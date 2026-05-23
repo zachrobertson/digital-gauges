@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b0d10;
+  --color-bg-panel: #13171c;
+  --color-bg-elev: #1a2027;
+
+  --color-accent: #3ddc97;
+  --color-accent-muted: #2a8f66;
+
+  --font-family-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+select,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: auto;
+}
+
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'],
+input[type='color'],
+input[type='number'] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+select {
+  color: #fff;
+  background-color: var(--color-bg-elev);
+  color-scheme: dark;
+}
+
+select option,
+select optgroup {
+  background-color: var(--color-bg-elev);
+  color: #fff;
+}
+
+@utility select-input {
+  @apply w-full rounded-md px-2 py-1.5 text-sm text-white border border-white/10 bg-bg-elev;
+}
+
+@utility panel {
+  @apply bg-bg-panel border border-white/5;
+}
+@utility btn {
+  @apply px-3 py-1.5 rounded-md text-sm font-medium transition-colors;
+}
+@utility btn-primary {
+  @apply px-3 py-1.5 rounded-md text-sm font-medium transition-colors bg-accent text-black hover:bg-accent/90;
+}
+@utility btn-ghost {
+  @apply px-3 py-1.5 rounded-md text-sm font-medium transition-colors bg-white/5 hover:bg-white/10 text-white;
+}
+@utility field-label {
+  @apply text-xs text-white/60 uppercase tracking-wider;
+}
