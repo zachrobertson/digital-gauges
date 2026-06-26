@@ -21,6 +21,8 @@ const api: DigitalGaugesApi = {
   clearDraft: () => ipcRenderer.invoke('session:clearDraft'),
 
   startExport: (project) => ipcRenderer.invoke('export:start', project),
+  startExportSegment: (jobId, clipIndex) => ipcRenderer.invoke('export:startSegment', jobId, clipIndex),
+  finishExportSegment: (jobId) => ipcRenderer.invoke('export:finishSegment', jobId),
   cancelExport: (jobId) => ipcRenderer.invoke('export:cancel', jobId),
   onExportProgress: (handler) => {
     const listener = (_: unknown, p: ExportProgress) => handler(p);
@@ -34,6 +36,8 @@ const api: DigitalGaugesApi = {
   },
   sendExportFrame: (jobId, frame) => ipcRenderer.invoke('export:frame', jobId, frame),
   finishExportFrames: (jobId) => ipcRenderer.invoke('export:finish', jobId),
+
+  buildPreviewVideo: (segments) => ipcRenderer.invoke('preview:build', segments),
 
   listUserPlugins: () => ipcRenderer.invoke('plugins:list'),
   openUserPluginsFolder: () => ipcRenderer.invoke('plugins:openFolder'),

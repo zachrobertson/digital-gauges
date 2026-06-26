@@ -2,17 +2,20 @@ import type { PanelStyle } from './common';
 import { clamp, drawBigNumber, drawLabel, fillPanel, roundRect, unitFont, withGaugeBoundsClip } from './common';
 import type { BarGaugeDisplayStyle, BarGaugeTextLayout } from './barGaugeSchema';
 import { resolveArcTickCount } from './barGaugeSchema';
-import type { GaugeLayoutConfig, TextRole } from './gaugeEditorLayout';
+import type { TextRole } from './gaugeEditorLayout';
 import {
   arcGeometry,
   arcPath,
   dialPoint as layoutDialPoint,
-  drawLayoutTextInLayoutSpace,
-  mergeGaugeLayout,
-  resolveBarConfig,
   resolveBarFillColor,
   withLayoutVideoTransform,
 } from './gaugeEditorLayout';
+import {
+  drawLegacyLayoutTextInLayoutSpace,
+  mergeLegacyGaugeLayout,
+  resolveBarConfig,
+  type LegacyGaugeLayoutConfig,
+} from './barGaugeLegacyLayout';
 import type { FillGradientConfig } from './gaugeGradient';
 import {
   fillBarWithGradient,
@@ -32,7 +35,7 @@ export interface BarGaugeRenderInput {
   color: string;
   displayStyle?: BarGaugeDisplayStyle;
   textLayout?: BarGaugeTextLayout;
-  layout?: GaugeLayoutConfig;
+  layout?: LegacyGaugeLayoutConfig;
   showLabel?: boolean;
   scaleMinLabel?: string;
   scaleMaxLabel?: string;
@@ -51,7 +54,7 @@ export function resolveDisplayStyle(v?: BarGaugeDisplayStyle): BarGaugeDisplaySt
 export function renderBarGauge(input: BarGaugeRenderInput): void {
   withGaugeBoundsClip(input.ctx, input.rect, () => {
     const style = resolveDisplayStyle(input.displayStyle);
-    const layout = mergeGaugeLayout(input.layout);
+    const layout = mergeLegacyGaugeLayout(input.layout);
     withLayoutVideoTransform(input.ctx, layout, input.rect, () => {
       if (style === 'text') {
         renderCustomTextGauge(input, layout);
@@ -64,7 +67,7 @@ export function renderBarGauge(input: BarGaugeRenderInput): void {
   });
 }
 
-function renderCustomTextGauge(input: BarGaugeRenderInput, layout: GaugeLayoutConfig): void {
+function renderCustomTextGauge(input: BarGaugeRenderInput, layout: LegacyGaugeLayoutConfig): void {
   const { ctx, panelStyle } = input;
   fillPanel(ctx, layout.gaugeRect, panelStyle);
   drawBarLayoutText(ctx, input, layout);
@@ -79,9 +82,9 @@ function roleText(role: TextRole, input: BarGaugeRenderInput): string {
 function drawBarLayoutText(
   ctx: CanvasRenderingContext2D,
   input: BarGaugeRenderInput,
-  layout: GaugeLayoutConfig,
+  layout: LegacyGaugeLayoutConfig,
 ): void {
-  drawLayoutTextInLayoutSpace(ctx, layout, {
+  drawLegacyLayoutTextInLayoutSpace(ctx, layout, {
     accentColor: input.color,
     fontFamily: input.panelStyle.fontFamily,
     fontScale: input.panelStyle.fontScale,
@@ -139,7 +142,7 @@ function fillBarRect(
   ctx.fillRect(x, y, w, h);
 }
 
-function renderCustomBarGauge(input: BarGaugeRenderInput, layout: GaugeLayoutConfig): void {
+function renderCustomBarGauge(input: BarGaugeRenderInput, layout: LegacyGaugeLayoutConfig): void {
   const { ctx, ratio, color, panelStyle } = input;
   fillPanel(ctx, layout.gaugeRect, panelStyle);
 
@@ -163,7 +166,7 @@ function renderCustomBarGauge(input: BarGaugeRenderInput, layout: GaugeLayoutCon
   drawBarLayoutText(ctx, input, layout);
 }
 
-function renderCustomArcGauge(input: BarGaugeRenderInput, layout: GaugeLayoutConfig): void {
+function renderCustomArcGauge(input: BarGaugeRenderInput, layout: LegacyGaugeLayoutConfig): void {
   const {
     ctx, panelStyle, ratio, color,
     scaleMinLabel = '0', scaleMaxLabel = 'MAX',

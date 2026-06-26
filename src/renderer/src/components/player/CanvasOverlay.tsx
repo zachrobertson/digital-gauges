@@ -1,11 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { useProject } from '../../store/project';
 import { allPlugins, usePlugins } from '../../store/plugins';
-import { buildRoutePolyline, frameAtVideoTime, type RouteScope } from '../../lib/telemetry';
+import { buildCourseMarkers, buildRoutePolyline, frameAtGlobalTime, type CourseMarkerPoints, type RouteScope } from '../../lib/telemetry';
 import type { GpsRouteScope } from '../../gauges/gpsMiniMap';
-import { isDataGaugePlugin, resolveDataGaugeDisplayStyle } from '../../gauges/dataGauge';
+import { isMapGaugeConfig } from '../../gauges/dataGauge';
 import { withGaugeBoundsClip } from '../../gauges/common';
-import { panelCircleGeometry } from '../../gauges/gaugeEditorLayout';
+import { isEllipseFrame, type FrameStyleConfig } from '../../gauges/frameStyle';
+import {
+  panelEllipseGeometry,
+  videoGaugeHandleRelPosition,
+  videoGaugeResizeHandles,
+} from '../../gauges/gaugeEditorLayout';
 import type { GaugePlugin } from '@shared/types';
 
 interface Props {
@@ -13,6 +18,8 @@ interface Props {
   height: number;
   /** When true, draw selection handles + drop-shadow on the selected gauge. */
   showEditorAffordances?: boolean;
+  /** When true, pause RAF updates and keep the last drawn frame. */
+  previewFrozen?: boolean;
 }
 
 /**
@@ -22,7 +29,7 @@ interface Props {
  * The same `renderToCanvas` is reused by the export pipeline, so what
  * you see in the editor is what you get in the final MP4.
  */
-export function CanvasOverlay({ width, height, showEditorAffordances }: Props) {
+export function CanvasOverlay({ width, height, showEditorAffordances, previewFrozen = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const selectedId = useProject((s) => s.selectedGaugeId);
   const userPlugins = usePlugins((s) => s.user);
@@ -31,6 +38,7 @@ export function CanvasOverlay({ width, height, showEditorAffordances }: Props) {
     full: [],
     video: [],
   });
+  const courseMarkersRef = useRef<CourseMarkerPoints>({ start: null, finish: null });
 
   useEffect(() => {
     const syncPolylines = () => {
@@ -39,12 +47,13 @@ export function CanvasOverlay({ width, height, showEditorAffordances }: Props) {
         full: buildRoutePolyline(project, 'full'),
         video: buildRoutePolyline(project, 'video'),
       };
+      courseMarkersRef.current = buildCourseMarkers(project);
     };
     syncPolylines();
     return useProject.subscribe((state, prev) => {
-      if (state.project.tracks !== prev.project.tracks
-        || state.project.trackSync !== prev.project.trackSync
-        || state.project.video !== prev.project.video) {
+      if (state.project.clips !== prev.project.clips
+        || state.project.sharedTracks !== prev.project.sharedTracks
+        || state.project.course !== prev.project.course) {
         syncPolylines();
       }
     });
@@ -68,12 +77,14 @@ export function CanvasOverlay({ width, height, showEditorAffordances }: Props) {
     const ctx = cvs.getContext('2d');
     if (!ctx) return;
 
+    if (previewFrozen) return;
+
     let raf = 0;
 
     const draw = () => {
       ctx.clearRect(0, 0, width, height);
       const { project, playhead } = useProject.getState();
-      const frame = frameAtVideoTime(project, playhead);
+      const frame = frameAtGlobalTime(project, playhead);
 
       const plugins: GaugePlugin[] = allPlugins({
         builtins: usePlugins.getState().builtins,
@@ -81,7 +92,7 @@ export function CanvasOverlay({ width, height, showEditorAffordances }: Props) {
         setUserPlugins: usePlugins.getState().setUserPlugins,
       });
 
-      const sorted = [...project.gauges].sort((a, b) => a.z - b.z);
+      const sorted = [...project.gauges].filter((g) => g.placed !== false).sort((a, b) => a.z - b.z);
 
       for (const g of sorted) {
         const plugin = plugins.find((p) => p.id === g.pluginId);
@@ -93,13 +104,16 @@ export function CanvasOverlay({ width, height, showEditorAffordances }: Props) {
           h: g.rect.h * height,
         };
         const config = { ...plugin.defaultConfig, ...g.config };
-        const isMapGauge = isDataGaugePlugin(plugin.id)
-          ? resolveDataGaugeDisplayStyle(config) === 'map'
-          : plugin.id === 'builtin:gpsMiniMap';
-        if (isMapGauge) {
+        if (isMapGaugeConfig(plugin.id, config)) {
           const scope = ((config as { routeScope?: GpsRouteScope }).routeScope ?? 'video') as RouteScope;
-          (config as { fullTrack?: { lat: number; lon: number }[] }).fullTrack =
-            polylinesRef.current[scope];
+          const mapConfig = config as {
+            fullTrack?: { lat: number; lon: number }[];
+            courseStart?: { lat: number; lon: number } | null;
+            courseFinish?: { lat: number; lon: number } | null;
+          };
+          mapConfig.fullTrack = polylinesRef.current[scope];
+          mapConfig.courseStart = courseMarkersRef.current.start;
+          mapConfig.courseFinish = courseMarkersRef.current.finish;
         }
         try {
           withGaugeBoundsClip(ctx, rect, () => {
@@ -110,8 +124,9 @@ export function CanvasOverlay({ width, height, showEditorAffordances }: Props) {
         }
 
         if (showEditorAffordances && g.id === selectedId) {
-          const isCircle = (config as { cornerStyle?: string }).cornerStyle === 'circle';
-          drawSelection(ctx, rect, isCircle);
+          const isEllipse = isEllipseFrame(config as FrameStyleConfig);
+          drawSelection(ctx, rect, isEllipse);
+          drawResizeHandles(ctx, g.rect, width, height, isEllipse);
         }
       }
 
@@ -119,7 +134,7 @@ export function CanvasOverlay({ width, height, showEditorAffordances }: Props) {
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [selectedId, showEditorAffordances, userPlugins, width, height]);
+  }, [selectedId, showEditorAffordances, userPlugins, width, height, previewFrozen]);
 
   return (
     <canvas
@@ -130,24 +145,51 @@ export function CanvasOverlay({ width, height, showEditorAffordances }: Props) {
   );
 }
 
+const HANDLE_RADIUS = 5;
+const SELECTION_COLOR = '#3ddc97';
+
 function drawSelection(
   ctx: CanvasRenderingContext2D,
   rect: { x: number; y: number; w: number; h: number },
-  circle = false,
+  ellipse = false,
 ) {
   ctx.save();
-  ctx.strokeStyle = '#3ddc97';
+  ctx.strokeStyle = SELECTION_COLOR;
   ctx.lineWidth = 2;
   ctx.setLineDash([6, 4]);
-  if (circle) {
-    const { cx, cy, r } = panelCircleGeometry(rect);
+  if (ellipse) {
+    const { cx, cy, rx, ry } = panelEllipseGeometry(rect);
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
     return;
   }
   ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.restore();
+}
+
+function drawResizeHandles(
+  ctx: CanvasRenderingContext2D,
+  relRect: { x: number; y: number; w: number; h: number },
+  videoW: number,
+  videoH: number,
+  isEllipse = false,
+) {
+  ctx.save();
+  for (const corner of videoGaugeResizeHandles(relRect, isEllipse)) {
+    const p = videoGaugeHandleRelPosition(relRect, corner, isEllipse);
+    const px = p.x * videoW;
+    const py = p.y * videoH;
+    ctx.beginPath();
+    ctx.arc(px, py, HANDLE_RADIUS, 0, Math.PI * 2);
+    ctx.fillStyle = SELECTION_COLOR;
+    ctx.fill();
+    ctx.strokeStyle = '#0c1014';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 

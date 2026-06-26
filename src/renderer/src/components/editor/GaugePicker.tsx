@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useProject } from '../../store/project';
 import { findPluginById } from '../../store/plugins';
-import { createNewGauge, gaugeDisplayLabel } from '../../lib/gaugeFactory';
+import { createNewGauge, gaugeDisplayLabel, isUnsupportedGaugeConfig } from '../../lib/gaugeFactory';
 import { useGaugeTemplates } from '../../lib/useGaugeTemplates';
 import { useNamePrompt } from '../../lib/useNamePrompt';
 import { isDataGaugePlugin } from '../../gauges/dataGauge';
@@ -50,15 +50,26 @@ export function GaugePicker() {
         )}
       </div>
 
+      {sortedGauges.some((g) => {
+        const plugin = findPluginById(g.pluginId);
+        const merged = { ...plugin?.defaultConfig, ...g.config };
+        return isDataGaugePlugin(g.pluginId) && isUnsupportedGaugeConfig(merged);
+      }) && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-100/90 leading-relaxed">
+          One or more gauges use a pre-v4 format without composite elements. Remove and recreate them to edit or export correctly.
+        </div>
+      )}
+
       <section className="flex flex-col gap-2">
-        <h3 className="field-label">Placed gauges</h3>
+        <h3 className="field-label">Configured gauges</h3>
         {sortedGauges.length === 0 ? (
-          <p className="text-xs text-white/40">No gauges yet. Click New gauge to add one.</p>
+          <p className="text-xs text-white/40">No gauges yet. Click New gauge to add one, then place it on the video in the Edit tab.</p>
         ) : (
           <ul className="flex flex-col gap-1">
             {sortedGauges.map((g) => {
               const plugin = findPluginById(g.pluginId);
               const merged = { ...plugin?.defaultConfig, ...g.config };
+              const unsupported = isDataGaugePlugin(g.pluginId) && isUnsupportedGaugeConfig(merged);
               const label = isDataGaugePlugin(g.pluginId)
                 ? gaugeDisplayLabel(g, merged)
                 : (plugin?.name ?? g.pluginId);
@@ -70,10 +81,13 @@ export function GaugePicker() {
                     className={`w-full text-left rounded-md border px-3 py-2 text-sm transition-colors ${
                       selectedId === g.id
                         ? 'border-accent/60 bg-accent/10 text-white'
-                        : 'border-white/10 bg-white/5 text-white/80 hover:bg-white/10'
+                        : unsupported
+                          ? 'border-amber-500/30 bg-amber-500/5 text-amber-100/80 hover:bg-amber-500/10'
+                          : 'border-white/10 bg-white/5 text-white/80 hover:bg-white/10'
                     }`}
                   >
                     {label}
+                    {unsupported && <span className="block text-[10px] text-amber-200/60 mt-0.5">Unsupported — recreate</span>}
                   </button>
                 </li>
               );
@@ -108,16 +122,20 @@ export function GaugePicker() {
                   title={`Apply ${t.type} template`}
                 >
                   <span className="font-medium text-white/90">{t.name}</span>
-                  <span className="ml-2 text-white/40 uppercase text-[10px]">{t.type}</span>
+                  <span className="ml-2 text-white/40 uppercase text-[10px]">
+                    {t.source === 'builtin' ? 'built-in' : t.type}
+                  </span>
                 </button>
-                <button
-                  type="button"
-                  className="btn-ghost text-[10px] text-red-300 px-2"
-                  onClick={() => void deleteTemplate(t.id)}
-                  title="Delete template"
-                >
-                  ×
-                </button>
+                {t.source !== 'builtin' && (
+                  <button
+                    type="button"
+                    className="btn-ghost text-[10px] text-red-300 px-2"
+                    onClick={() => void deleteTemplate(t.id)}
+                    title="Delete template"
+                  >
+                    ×
+                  </button>
+                )}
               </li>
             ))}
           </ul>

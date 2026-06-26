@@ -3,18 +3,85 @@ import { hrZoneColor } from './heartRate';
 import { powerZoneColor } from './power';
 
 const KMH_TO_MPH = 0.621371;
+const KM_TO_MI = 0.621371;
+const M_PER_MI = 1609.344;
+const M_TO_FT = 3.28084;
+
+function isImperialDistance(c: Record<string, unknown>): boolean {
+  return c.distanceUnits === 'mi';
+}
+
+function distanceFormatUnit(raw: number, c: Record<string, unknown>): string {
+  if (isImperialDistance(c)) {
+    return Math.abs(raw) < M_PER_MI ? 'FT' : 'MI';
+  }
+  return Math.abs(raw) < 1000 ? 'M' : 'KM';
+}
+
+function distanceFormatValue(raw: number, c: Record<string, unknown>): string {
+  if (isImperialDistance(c)) {
+    if (Math.abs(raw) < M_PER_MI) {
+      return String(Math.round(raw * M_TO_FT));
+    }
+    return (raw / M_PER_MI).toFixed(2);
+  }
+  return Math.abs(raw) < 1000 ? String(Math.round(raw)) : (raw / 1000).toFixed(2);
+}
+
+function distanceGetUnit(c: Record<string, unknown>): string {
+  return isImperialDistance(c) ? 'MI' : 'KM';
+}
+
+function distanceGetScaleMax(c: Record<string, unknown>, defaultMax: number): number {
+  const km = Number(c.scaleMax ?? defaultMax);
+  return isImperialDistance(c) ? km * KM_TO_MI : km;
+}
+
+function distanceGetScaleMaxRange(
+  c: Record<string, unknown>,
+  step: number,
+): { min: number; max: number; step: number } {
+  return isImperialDistance(c)
+    ? { min: 1, max: 310, step }
+    : { min: 1, max: 500, step };
+}
+
+function distancePatchScaleMax(c: Record<string, unknown>, v: number): Record<string, unknown> {
+  const km = isImperialDistance(c) ? v / KM_TO_MI : v;
+  return { ...c, scaleMax: km };
+}
+
+function distanceGetRatio(raw: number, c: Record<string, unknown>, defaultMax: number): number {
+  const scaleMaxKm = Number(c.scaleMax ?? defaultMax);
+  if (isImperialDistance(c)) {
+    const scaleMaxMi = scaleMaxKm * KM_TO_MI;
+    return clamp01((raw / M_PER_MI) / scaleMaxMi);
+  }
+  return clamp01((raw / 1000) / scaleMaxKm);
+}
+
+function distanceDisplayToRaw(d: number, c: Record<string, unknown>): number {
+  if (isImperialDistance(c)) {
+    return d * M_PER_MI;
+  }
+  return d * 1000;
+}
 
 export interface FieldMeta {
   label: string;
   unit: string;
   defaultColor: string;
   getUnit: (config: Record<string, unknown>) => string;
+  /** Value-aware unit (e.g. distance shows "M" under 1 km, "KM" above). Falls back to getUnit. */
+  formatUnit?: (raw: number, config: Record<string, unknown>) => string;
   getScaleMax: (config: Record<string, unknown>) => number;
   getScaleMaxRange: (config: Record<string, unknown>) => { min: number; max: number; step: number };
   patchScaleMax: (config: Record<string, unknown>, value: number) => Record<string, unknown>;
   formatValue: (raw: number, config: Record<string, unknown>) => string;
   formatScaleMaxLabel: (scaleMax: number, config: Record<string, unknown>) => string;
   getRatio: (raw: number, config: Record<string, unknown>) => number;
+  /** Inverse of the display formatting: convert a display-unit value back to a raw telemetry value. */
+  displayToRaw?: (displayValue: number, config: Record<string, unknown>) => number;
   getFillColor?: (
     raw: number,
     ratio: number,
@@ -57,6 +124,7 @@ const FIELD_REGISTRY: Partial<Record<TelemetryField, FieldMeta>> = {
       const kmh = Number(c.maxSpeedKmh ?? c.scaleMax ?? 80);
       return clamp01((raw * 3.6) / kmh);
     },
+    displayToRaw: (d, c) => (c.units === 'mph' ? d / 2.23693629 : d / 3.6),
     defaultConfig: { units: 'kmh', maxSpeedKmh: 80, scaleMax: 80, color: '#3ddc97' },
   },
   power: {
@@ -139,33 +207,38 @@ const FIELD_REGISTRY: Partial<Record<TelemetryField, FieldMeta>> = {
     formatValue: (raw) => `${(raw * 100).toFixed(1)}`,
     formatScaleMaxLabel: (max) => String(max),
     getRatio: (raw, c) => clamp01(Math.abs(raw) / (Number(c.scaleMax ?? 15) / 100)),
+    displayToRaw: (d) => d / 100,
     defaultConfig: { scaleMax: 15, color: '#eab308' },
   },
   distance: {
     label: 'Distance',
     unit: 'KM',
     defaultColor: '#38bdf8',
-    getUnit: () => 'KM',
-    getScaleMax: (c) => Number(c.scaleMax ?? 100),
-    getScaleMaxRange: () => ({ min: 1, max: 500, step: 5 }),
-    patchScaleMax: (c, v) => ({ ...c, scaleMax: v }),
-    formatValue: (raw) => (raw / 1000).toFixed(2),
+    getUnit: distanceGetUnit,
+    formatUnit: distanceFormatUnit,
+    getScaleMax: (c) => distanceGetScaleMax(c, 100),
+    getScaleMaxRange: (c) => distanceGetScaleMaxRange(c, 5),
+    patchScaleMax: distancePatchScaleMax,
+    formatValue: distanceFormatValue,
     formatScaleMaxLabel: (max) => String(max),
-    getRatio: (raw, c) => clamp01((raw / 1000) / Number(c.scaleMax ?? 100)),
-    defaultConfig: { scaleMax: 100, color: '#38bdf8' },
+    getRatio: (raw, c) => distanceGetRatio(raw, c, 100),
+    displayToRaw: distanceDisplayToRaw,
+    defaultConfig: { scaleMax: 100, distanceUnits: 'km', color: '#38bdf8' },
   },
   distanceToFinish: {
     label: 'Distance to Finish',
     unit: 'KM',
     defaultColor: '#22d3ee',
-    getUnit: () => 'KM',
-    getScaleMax: (c) => Number(c.scaleMax ?? 42),
-    getScaleMaxRange: () => ({ min: 1, max: 500, step: 1 }),
-    patchScaleMax: (c, v) => ({ ...c, scaleMax: v }),
-    formatValue: (raw) => (raw / 1000).toFixed(2),
+    getUnit: distanceGetUnit,
+    formatUnit: distanceFormatUnit,
+    getScaleMax: (c) => distanceGetScaleMax(c, 42),
+    getScaleMaxRange: (c) => distanceGetScaleMaxRange(c, 1),
+    patchScaleMax: distancePatchScaleMax,
+    formatValue: distanceFormatValue,
     formatScaleMaxLabel: (max) => String(max),
-    getRatio: (raw, c) => clamp01((raw / 1000) / Number(c.scaleMax ?? 42)),
-    defaultConfig: { scaleMax: 42, color: '#22d3ee' },
+    getRatio: (raw, c) => distanceGetRatio(raw, c, 42),
+    displayToRaw: distanceDisplayToRaw,
+    defaultConfig: { scaleMax: 42, distanceUnits: 'km', color: '#22d3ee' },
   },
   leanAngle: {
     label: 'Lean',
@@ -178,6 +251,7 @@ const FIELD_REGISTRY: Partial<Record<TelemetryField, FieldMeta>> = {
     formatValue: (raw) => `${((raw * 180) / Math.PI).toFixed(1)}`,
     formatScaleMaxLabel: (max) => String(max),
     getRatio: (raw, c) => clamp01(Math.abs(raw) / ((Number(c.scaleMax ?? 45) * Math.PI) / 180)),
+    displayToRaw: (d) => (d * Math.PI) / 180,
     defaultConfig: { scaleMax: 45, color: '#fb923c' },
   },
   accelX: genericMeta('Accel X', 'm/s²', '#94a3b8', 20),

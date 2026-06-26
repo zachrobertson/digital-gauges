@@ -7,9 +7,12 @@ import { parseFitFile } from '../extractors/fit';
 import {
   cancelExport,
   finishExportFrames,
+  finishExportSegment,
   startExport,
+  startExportSegment,
   writeExportFrame,
 } from '../export/ffmpeg';
+import { buildPreviewVideo } from '../preview/concat';
 import {
   listLoadedPlugins,
   openPluginsFolder,
@@ -44,14 +47,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('dialog:pickVideo', async () => {
     const win = getWindow();
     const res = await dialog.showOpenDialog(win!, {
-      title: 'Pick a ride video',
+      title: 'Pick ride videos',
       filters: [
         { name: 'Video', extensions: ['mp4', 'mov', 'insv', 'mkv', 'm4v'] },
         { name: 'All', extensions: ['*'] },
       ],
-      properties: ['openFile'],
+      properties: ['openFile', 'multiSelections'],
     });
-    return res.canceled ? null : res.filePaths[0];
+    return res.canceled ? [] : res.filePaths;
   });
 
   ipcMain.handle('dialog:pickFit', async () => {
@@ -181,6 +184,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     return exportJob;
   });
 
+  ipcMain.handle('export:startSegment', async (_e, jobId: string, clipIndex: number) => {
+    return startExportSegment(jobId, clipIndex);
+  });
+
+  ipcMain.handle('export:finishSegment', async (_e, jobId: string) => {
+    await finishExportSegment(jobId);
+  });
+
   ipcMain.handle('export:cancel', async (_e, jobId: string) => {
     cancelExport(jobId);
   });
@@ -191,6 +202,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('export:finish', async (_e, jobId: string) => {
     await finishExportFrames(jobId);
+  });
+
+  ipcMain.handle('preview:build', async (_e, segments: import('../../shared/types/ipc').PreviewSegment[]) => {
+    const path = await buildPreviewVideo(segments);
+    return { path };
   });
 
   ipcMain.handle('plugins:list', () => listLoadedPlugins());

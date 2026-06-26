@@ -1,14 +1,9 @@
 /** Gradual multi-stop fill gradient for bar/arc gauges (0 = min, 1 = max). */
 
-export interface FillGradientStop {
-  pos: number;
-  color: string;
-}
-
-export interface FillGradientConfig {
-  enabled: boolean;
-  stops: FillGradientStop[];
-}
+export type { FillGradientConfig, FillGradientStop } from '@shared/types/fillGradient';
+import type { FillGradientConfig, FillGradientStop } from '@shared/types/fillGradient';
+import type { GaugeElement } from '@shared/types/gaugeElement';
+import type { TelemetryField } from '@shared/types';
 
 export const HR_GRADIENT_PRESET: FillGradientConfig = {
   enabled: true,
@@ -146,6 +141,25 @@ export function resolveFillGradient(config: {
   fillGradient?: FillGradientConfig | null;
 }): FillGradientConfig {
   return mergeFillGradient(config.fillGradient);
+}
+
+export function defaultFillGradientForField(field: TelemetryField): FillGradientConfig | undefined {
+  switch (field) {
+    case 'hr': return HR_GRADIENT_PRESET;
+    case 'power': return POWER_GRADIENT_PRESET;
+    case 'speed': return SPEED_GRADIENT_PRESET;
+    default: return undefined;
+  }
+}
+
+export function resolveElementFillGradient(
+  element: GaugeElement | null | undefined,
+  gaugeConfig: Record<string, unknown>,
+): FillGradientConfig {
+  const fromElement = element && (element.kind === 'bar' || element.kind === 'arc')
+    ? element.fillGradient
+    : undefined;
+  return mergeFillGradient((fromElement ?? gaugeConfig.fillGradient) as FillGradientConfig | undefined);
 }
 
 export function fillColorForRatio(

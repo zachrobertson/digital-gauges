@@ -42,19 +42,23 @@ export interface SignalSeries {
   label: string;
   color: string;
   stepMs: number;
+  /** Timeline ms at index 0 — values[i] is the sample at startMs + i * stepMs. */
+  startMs: number;
   values: (number | null)[];
 }
 
 function resample(
   track: TelemetryTrack,
-  videoDurationMs: number,
+  startMs: number,
+  endMs: number,
   offsetMs: number,
   read: (frame: TelemetryFrame | null) => number | null,
 ): (number | null)[] {
-  const n = Math.max(1, Math.ceil(videoDurationMs / STEP_MS) + 1);
+  if (endMs <= startMs) return [];
+  const n = Math.max(1, Math.ceil((endMs - startMs) / STEP_MS) + 1);
   const out: (number | null)[] = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
-    const videoT = i * STEP_MS;
+    const videoT = startMs + i * STEP_MS;
     const f = sampleAt(track, videoT - offsetMs);
     out[i] = read(f);
   }
@@ -67,10 +71,16 @@ function readField(frame: TelemetryFrame | null, field: TelemetryField): number 
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
-/** One normalized waveform per sync-friendly scalar field present on the track. */
+/**
+ * One normalized waveform per sync-friendly scalar field present on the track.
+ * Samples the timeline in `[startMs, endMs]` at a fixed step; `offsetMs` is the
+ * timeline position where the track's t=0 sits (so the track is read at
+ * `videoT − offsetMs`).
+ */
 export function trackSyncSignals(
   track: TelemetryTrack,
-  videoDurationMs: number,
+  startMs: number,
+  endMs: number,
   offsetMs: number,
 ): SignalSeries[] {
   const fields = SYNC_PLOT_FIELDS.filter((f) => track.fields.includes(f));
@@ -79,7 +89,8 @@ export function trackSyncSignals(
     label: field,
     color: FIELD_COLORS[field],
     stepMs: STEP_MS,
-    values: resample(track, videoDurationMs, offsetMs, (f) => readField(f, field)),
+    startMs,
+    values: resample(track, startMs, endMs, offsetMs, (f) => readField(f, field)),
   }));
 }
 

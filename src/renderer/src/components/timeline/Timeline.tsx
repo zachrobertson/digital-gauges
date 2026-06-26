@@ -1,11 +1,23 @@
+import { memo, useMemo } from 'react';
 import { useProject } from '../../store/project';
-import type { SyncAnchor } from '@shared/types';
+import type { Project, TelemetryTrack, TimelineClip } from '@shared/types';
 import {
-  formatOffsetMs,
-  SYNC_ANCHOR_LABELS,
+  clipAtGlobalTime,
+  clipBoundariesMs,
+  clipDurationMs,
+  clipEndGlobalMs,
+  clipStartGlobalMs,
+  globalTimeFromClipLocal,
+  projectDurationMs,
+  totalDurationMs,
+} from '@shared/timeline';
+import {
+  effectiveSharedFitOffsetMs,
   trackOffsetMs,
 } from '@shared/sync';
 import { SyncViewer } from './SyncViewer';
+import { fitSampleTimeAtGlobalMs } from '../../lib/telemetry';
+import { SyncMapPreview } from '../sync/SyncMapPreview';
 
 function formatVideoTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -18,228 +30,223 @@ function formatVideoTime(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function formatKm(meters: number | null | undefined): string {
-  if (meters == null) return '—';
-  return `${(meters / 1000).toFixed(2)} km`;
-}
-
-/**
- * Sync timeline.
- *
- * Offset semantics (per FIT track):
- *   At video time V, sample FIT at local time (V − offsetMs).
- *   offsetMs is the video timestamp where FIT t=0 begins — drag the FIT
- *   row in the manual sync viewer to slide it.
- */
-export function Timeline() {
-  const project = useProject((s) => s.project);
-  const setOffset = useProject((s) => s.setOffset);
-  const setTrackAnchor = useProject((s) => s.setTrackAnchor);
-  const removeTrack = useProject((s) => s.removeTrack);
+/** Playhead-only bar — isolated so track rows / inputs are not re-rendered every frame. */
+function SyncPlayheadBar({
+  clips,
+  selectedClip,
+  fitTrackId,
+}: {
+  clips: TimelineClip[];
+  selectedClip: TimelineClip | null;
+  fitTrackId?: string;
+}) {
   const playhead = useProject((s) => s.playhead);
-  const setCourseDistance = useProject((s) => s.setCourseDistance);
-  const setCourseMarker = useProject((s) => s.setCourseMarker);
-  const clearCourseMarker = useProject((s) => s.clearCourseMarker);
-
-  if (!project.video) return null;
-
-  const videoDur = project.video.durationMs;
-  const course = project.course;
-
-  const fitTrack = project.tracks.find((t) => t.source === 'fit');
-  const fitHasDistance = fitTrack?.fields.includes('distance') ?? false;
-
-  const courseLengthM = course?.startDistanceM != null && course?.finishDistanceM != null
-    ? course.finishDistanceM - course.startDistanceM
-    : null;
-
-  const setMarkerAtPlayhead = (field: 'start' | 'finish') => {
-    const ok = setCourseMarker(field, playhead);
-    if (!ok) {
-      alert('Distance unavailable at playhead — ensure FIT track has distance data.');
-    }
-  };
+  const globalDur = projectDurationMs(clips, useProject.getState().project.overlays);
+  const playheadLoc = clipAtGlobalTime(clips, playhead);
+  const project = useProject((s) => s.project);
+  const globalFitMs = fitTrackId ? fitSampleTimeAtGlobalMs(project, playhead) : null;
 
   return (
-    <div className="panel border-t flex flex-col max-h-[42vh] overflow-y-auto">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 text-xs sticky top-0 bg-bg-panel z-10">
-        <span className="field-label">Sync</span>
-        <span className="text-white/40">
-          playhead {(playhead / 1000).toFixed(2)}s / {(videoDur / 1000).toFixed(2)}s
+    <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 text-xs sticky top-0 bg-bg-panel/95 backdrop-blur-sm z-10 pointer-events-none">
+      <span className="field-label">Sync</span>
+      <span className="text-white/40">
+        global {(playhead / 1000).toFixed(2)}s / {(globalDur / 1000).toFixed(2)}s
+      </span>
+      {playheadLoc && (
+        <span className="text-white/30">
+          · clip {playheadLoc.clipIndex + 1} local {(playheadLoc.localMs / 1000).toFixed(2)}s
         </span>
-        {project.video.creationTime && (
-          <span className="text-white/30 ml-auto font-mono" title="MP4 creation_time (UTC)">
-            video UTC {project.video.creationTime.replace('T', ' ').replace(/\.\d{3}Z$/, 'Z')}
-          </span>
-        )}
-      </div>
-
-      <div className="flex flex-col">
-        {project.tracks.map((t) => {
-          const sync = project.trackSync[t.id];
-          const offset = trackOffsetMs(project.trackSync, t.id);
-          const isFit = t.source === 'fit';
-
-          return (
-            <div key={t.id} className="flex items-center gap-3 px-3 py-2 border-b border-white/5">
-              <div className="w-44 truncate text-sm">
-                <span className="font-medium">{t.brand}</span>
-                <div className="text-[10px] text-white/40 uppercase tracking-wider">
-                  {t.source} · {t.fields.join(' · ')}
-                </div>
-              </div>
-
-              {isFit ? (
-                <>
-                  <select
-                    value={sync?.anchor ?? 'utc'}
-                    onChange={(e) => setTrackAnchor(t.id, e.target.value as SyncAnchor)}
-                    className="select-input text-xs py-1"
-                    title="How this track is aligned to the video"
-                  >
-                    {(Object.keys(SYNC_ANCHOR_LABELS) as SyncAnchor[]).map((key) => (
-                      <option key={key} value={key}>{SYNC_ANCHOR_LABELS[key]}</option>
-                    ))}
-                  </select>
-
-                  <div
-                    className="flex-1 text-right text-[10px] font-mono text-accent"
-                    title={`${offset} ms`}
-                  >
-                    {formatOffsetMs(offset)}
-                  </div>
-                  <input
-                    type="number"
-                    step={1}
-                    value={offset}
-                    onChange={(e) => setOffset(t.id, parseInt(e.target.value || '0', 10))}
-                    className="w-20 bg-white/5 rounded px-2 py-1 text-xs border border-white/10 text-right font-mono"
-                    title="Offset in milliseconds"
-                  />
-                  <span className="text-[10px] text-white/40 w-4">ms</span>
-                </>
-              ) : (
-                <div className="flex-1 text-xs text-white/30 italic">
-                  Camera track — fixed at video t=0
-                </div>
-              )}
-
-              <button
-                className="btn-ghost text-xs text-red-300"
-                onClick={() => removeTrack(t.id)}
-                title="Remove track"
-              >
-                ✕
-              </button>
-            </div>
-          );
-        })}
-
-        {project.tracks.length === 0 && (
-          <div className="px-3 py-6 text-xs text-white/40 text-center">
-            No telemetry yet — load a video or FIT file to extract data.
-          </div>
-        )}
-      </div>
-
-      {fitHasDistance && (
-        <div className="border-b border-white/5 px-3 py-3 flex flex-col gap-3">
-          <div className="text-xs font-semibold uppercase tracking-wider text-white/70">Course</div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <CourseMarkerColumn
-              label="Start"
-              distanceM={course?.startDistanceM ?? null}
-              markerVideoMs={course?.startMarkerVideoMs ?? null}
-              kmValue={course?.startDistanceM != null ? course.startDistanceM / 1000 : ''}
-              onKmChange={(km) => setCourseDistance('start', km == null ? null : km * 1000)}
-              onSetAtPlayhead={() => setMarkerAtPlayhead('start')}
-              onClear={() => clearCourseMarker('start')}
-            />
-            <CourseMarkerColumn
-              label="Finish"
-              distanceM={course?.finishDistanceM ?? null}
-              markerVideoMs={course?.finishMarkerVideoMs ?? null}
-              kmValue={course?.finishDistanceM != null ? course.finishDistanceM / 1000 : ''}
-              onKmChange={(km) => setCourseDistance('finish', km == null ? null : km * 1000)}
-              onSetAtPlayhead={() => setMarkerAtPlayhead('finish')}
-              onClear={() => clearCourseMarker('finish')}
-            />
-          </div>
-
-          <div className="text-xs text-white/50">
-            Course length: {courseLengthM != null ? formatKm(courseLengthM) : '—'}
-          </div>
-        </div>
       )}
-
-      {fitTrack && (
-        <SyncViewer
-          project={project}
-          fitTrack={fitTrack}
-          fitOffsetMs={trackOffsetMs(project.trackSync, fitTrack.id)}
-          videoDurationMs={videoDur}
-          playheadMs={playhead}
-          onOffsetChange={(ms) => setOffset(fitTrack.id, ms)}
-        />
+      {globalFitMs != null && globalFitMs >= 0 && (
+        <span className="text-accent/80" title="Continuous FIT ride time at playhead">
+          · FIT ride {formatVideoTime(globalFitMs)}
+        </span>
+      )}
+      {selectedClip?.media.creationTime && (
+        <span className="text-white/30 ml-auto font-mono" title="MP4 creation_time (UTC)">
+          clip UTC {selectedClip.media.creationTime.replace('T', ' ').replace(/\.\d{3}Z$/, 'Z')}
+        </span>
       )}
     </div>
   );
 }
 
-function CourseMarkerColumn({
-  label,
-  distanceM,
-  markerVideoMs,
-  kmValue,
-  onKmChange,
-  onSetAtPlayhead,
-  onClear,
-}: {
-  label: string;
-  distanceM: number | null;
-  markerVideoMs: number | null | undefined;
-  kmValue: number | '';
-  onKmChange: (km: number | null) => void;
-  onSetAtPlayhead: () => void;
-  onClear: () => void;
-}) {
+/** Global ruler playhead marker — playhead subscription isolated here. Scrubbable. */
+function GlobalTimelineRuler({ clips }: { clips: TimelineClip[] }) {
+  const playhead = useProject((s) => s.playhead);
+  const setPlayhead = useProject((s) => s.setPlayhead);
+  const setPlaying = useProject((s) => s.setPlaying);
+  const overlays = useProject((s) => s.project.overlays);
+  const globalDur = projectDurationMs(clips, overlays);
+  const selectedClipId = useProject((s) => s.selectedClipId);
+  const selectedClip = clips.find((c) => c.id === selectedClipId) ?? clips[0] ?? null;
+
+  const scrubFrom = (clientX: number, el: HTMLElement) => {
+    if (globalDur <= 0) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0) return;
+    const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    setPlaying(false);
+    setPlayhead(Math.round(ratio * globalDur));
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    scrubFrom(e.clientX, e.currentTarget);
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.buttons !== 1) return;
+    scrubFrom(e.clientX, e.currentTarget);
+  };
+
   return (
-    <div className="flex flex-col gap-2 border border-white/10 rounded-md p-2">
-      <div className="text-xs font-semibold text-white/80">{label}</div>
-      <div className="flex items-center gap-2">
-        <input
-          type="number"
-          min={0}
-          step={0.01}
-          value={kmValue}
-          placeholder="km"
-          onChange={(e) => {
-            const raw = e.target.value;
-            if (raw === '') {
-              onKmChange(null);
-              return;
-            }
-            const parsed = Number(raw);
-            if (!Number.isNaN(parsed)) onKmChange(parsed);
-          }}
-          className="flex-1 min-w-0 bg-white/5 rounded px-2 py-1 text-xs border border-white/10 font-mono"
-        />
-        <span className="text-xs text-white/40 shrink-0">km</span>
+    <div className="px-3 py-2 border-b border-white/5">
+      <div className="text-[10px] text-white/40 mb-1">Global timeline · click or drag to scrub</div>
+      <div
+        className="relative h-4 bg-white/[0.03] rounded overflow-hidden cursor-ew-resize touch-none"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+      >
+        {clips.map((clip, i) => {
+          const start = clipStartGlobalMs(clips, i);
+          const end = clipEndGlobalMs(clips, i);
+          const left = globalDur > 0 ? (start / globalDur) * 100 : 0;
+          const width = globalDur > 0 ? ((end - start) / globalDur) * 100 : 0;
+          const isSelected = clip.id === selectedClip?.id;
+          return (
+            <div
+              key={clip.id}
+              className={`absolute top-0 h-full border-r border-black/30 ${
+                isSelected ? 'bg-accent/25' : 'bg-white/[0.06]'
+              }`}
+              style={{ left: `${left}%`, width: `${width}%` }}
+              title={`${clip.media.filename} (${formatVideoTime(clip.media.durationMs)})`}
+            />
+          );
+        })}
+        {globalDur > 0 && (
+          <div
+            className="absolute top-0 w-0.5 h-full bg-amber-400 z-10 pointer-events-none"
+            style={{ left: `${(playhead / globalDur) * 100}%` }}
+          />
+        )}
       </div>
-      <button type="button" className="btn-ghost text-xs" onClick={onSetAtPlayhead}>
-        Set {label.toLowerCase()} at playhead
-      </button>
-      {distanceM != null && (
-        <div className="text-[10px] text-white/45 font-mono leading-relaxed">
-          {label} marker: {formatKm(distanceM)}
-          {markerVideoMs != null && ` @ ${formatVideoTime(markerVideoMs)}`}
+      <div className="flex justify-between text-[9px] text-white/30 font-mono mt-0.5">
+        <span>0:00</span>
+        <span>{formatVideoTime(globalDur)}</span>
+      </div>
+    </div>
+  );
+}
+
+const SyncViewerPanel = memo(function SyncViewerPanel({
+  project,
+  selectedClip,
+  selectedClipIndex,
+  fitTrack,
+  fitOffset,
+  fitScope,
+  clipDur,
+  linkLocked,
+}: {
+  project: Project;
+  selectedClip: TimelineClip;
+  selectedClipIndex: number;
+  fitTrack: TelemetryTrack;
+  fitOffset: number;
+  fitScope: 'local' | 'shared';
+  clipDur: number;
+  linkLocked: boolean;
+}) {
+  const playhead = useProject((s) => s.playhead);
+  const setClipOffset = useProject((s) => s.setClipOffset);
+  const playheadLoc = clipAtGlobalTime(project.clips, playhead);
+  const clipLocalPlayhead = playheadLoc?.clip.id === selectedClip.id
+    ? playheadLoc.localMs
+    : null;
+  const syncTracksForViewer = [...selectedClip.localTracks, ...project.sharedTracks];
+  const syncMapForViewer = { ...selectedClip.localTrackSync, ...selectedClip.sharedTrackSync };
+  const totalDur = projectDurationMs(project.clips, project.overlays);
+  const boundaries = clipBoundariesMs(project.clips);
+  const selectedClipStartMs = globalTimeFromClipLocal(project.clips, selectedClipIndex, 0);
+
+  return (
+    <SyncViewer
+      fitTrack={fitTrack}
+      fitOffsetMs={fitOffset}
+      clipDurationMs={clipDur}
+      clipLocalPlayheadMs={clipLocalPlayhead}
+      globalPlayheadMs={playhead}
+      clipMedia={selectedClip.media}
+      syncTracks={syncTracksForViewer}
+      syncMap={syncMapForViewer}
+      project={project}
+      selectedClip={selectedClip}
+      selectedClipIndex={selectedClipIndex}
+      selectedClipStartMs={selectedClipStartMs}
+      totalDurationMs={totalDur}
+      clipBoundariesMs={boundaries}
+      linkLocked={linkLocked}
+      onOffsetChange={(ms) => setClipOffset(selectedClip.id, fitTrack.id, ms, fitScope)}
+    />
+  );
+});
+
+interface TimelineProps {
+  linkLocked: boolean;
+}
+
+/**
+ * Sync timeline strip — global ruler, optional GPS map, and waveform viewer.
+ */
+export function Timeline({ linkLocked }: TimelineProps) {
+  const project = useProject((s) => s.project);
+  const selectedClipId = useProject((s) => s.selectedClipId);
+
+  const selectedClip = useMemo(() => {
+    const id = selectedClipId ?? project.clips[0]?.id;
+    return project.clips.find((c) => c.id === id) ?? project.clips[0] ?? null;
+  }, [project.clips, selectedClipId]);
+
+  if (project.clips.length === 0) return null;
+
+  const clipDur = selectedClip ? clipDurationMs(selectedClip) : 0;
+  const selectedClipIndex = selectedClip
+    ? project.clips.findIndex((c) => c.id === selectedClip.id)
+    : -1;
+
+  const localFit = selectedClip?.localTracks.find((t) => t.source === 'fit');
+  const sharedFit = project.sharedTracks.find((t) => t.source === 'fit');
+  const fitTrack = localFit ?? sharedFit;
+  const fitScope = localFit ? 'local' : 'shared';
+  const fitOffset = fitTrack && selectedClip && selectedClipIndex >= 0
+    ? (fitScope === 'shared'
+      ? effectiveSharedFitOffsetMs(project.clips, selectedClipIndex, fitTrack.id)
+      : trackOffsetMs(selectedClip.localTrackSync, fitTrack.id))
+    : 0;
+
+  return (
+    <div className="panel border-t flex flex-col flex-1 min-h-0 overflow-hidden">
+      <SyncPlayheadBar clips={project.clips} selectedClip={selectedClip} fitTrackId={fitTrack?.id} />
+      <GlobalTimelineRuler clips={project.clips} />
+      <SyncMapPreview />
+      {fitTrack && selectedClip && selectedClipIndex >= 0 ? (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <SyncViewerPanel
+            project={project}
+            selectedClip={selectedClip}
+            selectedClipIndex={selectedClipIndex}
+            fitTrack={fitTrack}
+            fitOffset={fitOffset}
+            fitScope={fitScope}
+            clipDur={clipDur}
+            linkLocked={linkLocked}
+          />
         </div>
-      )}
-      {distanceM != null && (
-        <button type="button" className="btn-ghost text-[10px] text-red-300 self-start" onClick={onClear}>
-          Clear {label.toLowerCase()}
-        </button>
+      ) : (
+        <div className="px-3 py-6 text-xs text-white/40 text-center">
+          No FIT track — load a FIT file in Edit mode to align telemetry.
+        </div>
       )}
     </div>
   );
