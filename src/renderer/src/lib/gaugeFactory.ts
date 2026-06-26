@@ -1,4 +1,5 @@
-import type { GaugeInstance, TelemetryField, TelemetrySource } from '@shared/types';
+import type { CourseSettings, GaugeInstance, TelemetryField, TelemetrySource } from '@shared/types';
+import { isDataElement } from '@shared/types/gaugeElement';
 import { appearanceDefaults } from '../gauges/appearanceSchema';
 import { barGaugeDefaults } from '../gauges/barGaugeSchema';
 import {
@@ -7,17 +8,25 @@ import {
   SCALAR_GAUGE_FIELDS,
 } from '../gauges/fieldRegistry';
 import {
-  defaultLayoutForTemplate,
+  DEFAULT_GAUGE_LAYOUT,
   defaultVideoRectForLayout,
   mergeGaugeLayout,
   syncGaugeVideoRectHeight,
 } from '../gauges/gaugeEditorLayout';
 import {
-  defaultRectForDisplayStyle,
+  defaultRectForGauge,
   layoutTemplateForGauge,
 } from '../gauges/dataGauge';
-import type { Project } from '@shared/types';
+import type { Project, TelemetryTrack } from '@shared/types';
+import { firstClipMedia } from '@shared/timeline';
+import { allProjectTracks } from './telemetry';
 import type { GaugeTemplateFile, GaugeTemplateGaugeSpec } from '@shared/types/gaugeTemplate';
+import {
+  createElement,
+  defaultGaugeElements,
+  elementLabel,
+  isCompositeGaugeConfig,
+} from './gaugeElementFactory';
 
 const FIT_SOURCE: TelemetrySource = 'fit';
 const CAMERA_SOURCES: TelemetrySource[] = ['gopro', 'insta360', 'dji', 'sony', 'camm'];
@@ -27,10 +36,17 @@ export interface FieldOption {
   trackId: string;
   trackLabel: string;
   source: TelemetrySource;
-  group: 'fit' | 'camera';
+  group: 'fit' | 'camera' | 'derived';
 }
 
-export function collectFieldOptions(tracks: Project['tracks']): FieldOption[] {
+export const DERIVED_FIELD_DEPS: Partial<Record<TelemetryField, TelemetryField>> = {
+  distanceToFinish: 'distance',
+};
+
+export function collectFieldOptions(
+  tracks: TelemetryTrack[],
+  course?: CourseSettings | null,
+): FieldOption[] {
   const out: FieldOption[] = [];
   const seen = new Set<string>();
   for (const track of tracks) {
@@ -50,10 +66,24 @@ export function collectFieldOptions(tracks: Project['tracks']): FieldOption[] {
       });
     }
   }
+
+  const hasFitDistance = tracks.some(
+    (t) => t.source === FIT_SOURCE && t.fields.includes('distance'),
+  );
+  if (hasFitDistance && course?.finishDistanceM != null) {
+    out.push({
+      field: 'distanceToFinish',
+      trackId: 'derived:distanceToFinish',
+      trackLabel: 'Course finish',
+      source: FIT_SOURCE,
+      group: 'derived',
+    });
+  }
+
   return out;
 }
 
-export function availableFields(tracks: Project['tracks']): Set<string> {
+export function availableFields(tracks: TelemetryTrack[]): Set<string> {
   const f = new Set<string>();
   for (const t of tracks) for (const k of t.fields) f.add(k);
   return f;
@@ -74,36 +104,44 @@ export function pickDefaultField(fields: Set<string>): TelemetryField | null {
   return null;
 }
 
+function elementCanRender(
+  element: ReturnType<typeof createElement>,
+  fields: Set<string>,
+): boolean {
+  if (!isDataElement(element)) return true;
+  if (element.kind === 'map') return hasGpsData(fields);
+  const field = element.field;
+  if (fields.has(field)) return true;
+  const dep = DERIVED_FIELD_DEPS[field as TelemetryField];
+  return dep != null && fields.has(dep);
+}
+
 export function createNewGauge(project: Project): GaugeInstance {
-  const fields = availableFields(project.tracks);
-  const hasGps = hasGpsData(fields);
-  const defaultField = pickDefaultField(fields);
-  const displayStyle = defaultField ? 'bar' as const : hasGps ? 'map' as const : 'bar' as const;
-  const field = defaultField ?? 'speed';
+  const tracks = allProjectTracks(project);
+  const fields = availableFields(tracks);
+  const video = firstClipMedia(project);
+  const defaultField = pickDefaultField(fields) ?? 'speed';
+
+  const layout = {
+    ...DEFAULT_GAUGE_LAYOUT,
+    elements: defaultGaugeElements(DEFAULT_GAUGE_LAYOUT.gaugeRect, defaultField),
+  };
 
   const config: Record<string, unknown> = {
-    field,
-    ...defaultConfigForField(field),
+    ...defaultConfigForField(defaultField),
     ...appearanceDefaults,
     ...barGaugeDefaults,
-    displayStyle,
     trailColor: '#3ddc97',
     cursorColor: '#ffffff',
     routeScope: 'video',
-    layout: defaultLayoutForTemplate(displayStyle === 'map' ? 'gps' : 'telemetry'),
+    layout,
   };
 
-  let rect = defaultRectForDisplayStyle(
-    displayStyle,
-    project.video?.width ?? 1920,
-    project.video?.height ?? 1080,
-  );
+  let rect = defaultRectForGauge(layout, video?.width ?? 1920, video?.height ?? 1080);
 
-  if (project.video?.width && project.video?.height) {
-    const template = layoutTemplateForGauge(DATA_GAUGE_PLUGIN_ID, config);
-    const layout = mergeGaugeLayout(config.layout as Parameters<typeof mergeGaugeLayout>[0], template);
-    const panelShape = (config.cornerStyle as 'rounded' | 'square' | 'pill' | 'circle') ?? 'rounded';
-    rect = syncGaugeVideoRectHeight(rect, layout, project.video.width, project.video.height, panelShape);
+  if (video?.width && video?.height) {
+    const mergedLayout = mergeGaugeLayout(layout);
+    rect = syncGaugeVideoRectHeight(rect, mergedLayout, video.width, video.height);
   }
 
   const maxZ = project.gauges.reduce((m, g) => Math.max(m, g.z), 0);
@@ -114,25 +152,34 @@ export function createNewGauge(project: Project): GaugeInstance {
     z: maxZ + 1,
     rect,
     config,
+    placed: false,
   };
 }
 
-export function gaugeDisplayLabel(gauge: GaugeInstance, mergedConfig: Record<string, unknown>): string {
-  const displayStyle = mergedConfig.displayStyle ?? 'bar';
-  if (displayStyle === 'map') return 'Map';
-  const field = (mergedConfig.field as string | undefined) ?? 'speed';
-  const kind = String(displayStyle).charAt(0).toUpperCase() + String(displayStyle).slice(1);
-  return `${field} · ${kind}`;
+export function gaugeDisplayLabel(_gauge: GaugeInstance, mergedConfig: Record<string, unknown>): string {
+  if (!isCompositeGaugeConfig(mergedConfig)) return 'Unsupported gauge';
+  const layout = mergedConfig.layout as { elements: Parameters<typeof elementLabel>[0][] };
+  const visible = layout.elements.filter((e) => e.visible);
+  if (visible.length === 0) return 'Empty gauge';
+  if (visible.length === 1) return elementLabel(visible[0]!);
+  const dataEls = visible.filter(isDataElement);
+  if (dataEls.length === 0) return `${visible.length} elements`;
+  return dataEls.map((e) => elementLabel(e)).join(' + ');
 }
 
 export function gaugeCanRender(
   mergedConfig: Record<string, unknown>,
   fields: Set<string>,
 ): boolean {
-  const displayStyle = mergedConfig.displayStyle ?? 'bar';
-  if (displayStyle === 'map') return hasGpsData(fields);
-  const field = mergedConfig.field as string | undefined;
-  return !!field && fields.has(field);
+  if (!isCompositeGaugeConfig(mergedConfig)) return false;
+  const layout = mergedConfig.layout as { elements: Parameters<typeof elementCanRender>[0][] };
+  const dataEls = layout.elements.filter(isDataElement);
+  if (dataEls.length === 0) return true;
+  return dataEls.some((el) => elementCanRender(el, fields));
+}
+
+export function isUnsupportedGaugeConfig(config: Record<string, unknown>): boolean {
+  return !isCompositeGaugeConfig(config);
 }
 
 export function instanceFromTemplateSpec(
@@ -140,25 +187,15 @@ export function instanceFromTemplateSpec(
   project: Project,
   z: number,
 ): GaugeInstance | null {
-  const fields = availableFields(project.tracks);
-  const config: Record<string, unknown> = {
-    ...spec.config,
-    displayStyle: spec.displayStyle,
-    ...(spec.field ? { field: spec.field } : {}),
-  };
-  if (!gaugeCanRender(config, fields)) return null;
+  const config: Record<string, unknown> = { ...spec.config };
+  if (!isCompositeGaugeConfig(config)) return null;
 
-  let rect = spec.rect ?? defaultRectForDisplayStyle(
-    spec.displayStyle,
-    project.video?.width ?? 1920,
-    project.video?.height ?? 1080,
-  );
+  const video = firstClipMedia(project);
+  const layout = mergeGaugeLayout(config.layout as Parameters<typeof mergeGaugeLayout>[0]);
+  let rect = spec.rect ?? defaultRectForGauge(layout, video?.width ?? 1920, video?.height ?? 1080);
 
-  if (project.video?.width && project.video?.height) {
-    const template = layoutTemplateForGauge(DATA_GAUGE_PLUGIN_ID, config);
-    const layout = mergeGaugeLayout(config.layout as Parameters<typeof mergeGaugeLayout>[0], template);
-    const panelShape = (config.cornerStyle as 'rounded' | 'square' | 'pill' | 'circle') ?? 'rounded';
-    rect = syncGaugeVideoRectHeight(rect, layout, project.video.width, project.video.height, panelShape);
+  if (video?.width && video?.height) {
+    rect = syncGaugeVideoRectHeight(rect, layout, video.width, video.height);
   }
 
   return {
@@ -167,7 +204,14 @@ export function instanceFromTemplateSpec(
     z,
     rect,
     config,
+    placed: false,
   };
+}
+
+/** Human-readable label when a template spec uses a legacy non-composite format. */
+export function templateSpecSkipReason(spec: GaugeTemplateGaugeSpec): string | null {
+  if (isCompositeGaugeConfig(spec.config)) return null;
+  return gaugeDisplayLabel({} as GaugeInstance, spec.config);
 }
 
 export function buildLayoutFromTemplate(
@@ -180,17 +224,20 @@ export function buildLayoutFromTemplate(
   const skipped: string[] = [];
   specs.forEach((spec, i) => {
     const inst = instanceFromTemplateSpec(spec, project, baseZ + i + 1);
-    if (inst) gauges.push(inst);
-    else skipped.push(spec.field ?? spec.displayStyle);
+    if (inst) {
+      gauges.push(inst);
+      return;
+    }
+    const reason = templateSpecSkipReason(spec);
+    skipped.push(reason ?? gaugeDisplayLabel({} as GaugeInstance, spec.config));
   });
   return { gauges, skipped };
 }
 
 export function specFromGauge(gauge: GaugeInstance, mergedConfig: Record<string, unknown>): GaugeTemplateGaugeSpec {
+  const { displayStyle: _ds, field: _f, ...rest } = mergedConfig;
   return {
-    displayStyle: (mergedConfig.displayStyle ?? 'bar') as GaugeTemplateGaugeSpec['displayStyle'],
-    field: mergedConfig.field as TelemetryField | undefined,
-    config: { ...mergedConfig },
+    config: { ...rest },
     rect: { ...gauge.rect },
     z: gauge.z,
   };

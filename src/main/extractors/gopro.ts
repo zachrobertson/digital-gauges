@@ -1,13 +1,23 @@
+import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import ffmpegPath from 'ffmpeg-static';
 import { CameraExtractor } from './base';
-import { FfprobeResult, pickDataStreams } from './ffprobe';
+import { ffprobe, FfprobeResult, pickDataStreams } from './ffprobe';
 import type { TelemetryTrack } from '../../shared/types';
 import { emptyTrack, finalizeTrack, pushFrame } from './util';
 
 const GPMF_STREAM_CHUNK_BYTES = 4 * 1024 * 1024;
-/** Node's fs.readFile rejects above 2 GiB — stream earlier to stay safe. */
-const GPMF_BUFFER_THRESHOLD_BYTES = 1024 * 1024 * 1024;
+
+const FFMPEG_BIN: string = ((): string => {
+  if (typeof ffmpegPath === 'string') return ffmpegPath;
+  if (ffmpegPath && typeof (ffmpegPath as { path?: string }).path === 'string') {
+    return (ffmpegPath as { path: string }).path;
+  }
+  throw new Error('Could not resolve ffmpeg-static binary path.');
+})();
 
 interface GpmfExtractResult {
   rawData: Buffer;
@@ -74,17 +84,14 @@ export class GoProExtractor extends CameraExtractor {
     const goproTelemetry = (goproTelemetryMod as unknown as { default?: Function }).default
       ?? (goproTelemetryMod as unknown as Function);
 
-    const { size } = await stat(filePath);
-
-    // For files <1.5 GB use the simple Buffer path — fastest, single
-    // syscall. For larger files Node's fs.readFile errors with
-    // ERR_FS_FILE_TOO_LARGE above 2 GB; we fall back to streaming
-    // the file through mp4box.js via gpmf-extract's callback API.
-    const useStreaming = size >= GPMF_BUFFER_THRESHOLD_BYTES;
-
-    const extracted: GpmfExtractResult = useStreaming
-      ? await extractGpmfStreaming(filePath, gpmfExtract as GpmfExtractFn)
-      : await gpmfExtract(await readFileFully(filePath));
+    // Prefer ffmpeg demux of the tiny gpmd track — avoids loading the full
+    // video into memory (mp4box + gpmf-extract can exhaust RAM on large
+    // clips). Fall back to chunked mp4box streaming if ffmpeg fails.
+    const extracted: GpmfExtractResult = await withGpmfExtractionGuard(() =>
+      extractGpmfViaFfmpeg(filePath, gpmfExtract as GpmfExtractFn).catch(() =>
+        extractGpmfStreaming(filePath, gpmfExtract as GpmfExtractFn),
+      ),
+    );
 
     const telemetry: GoproTelemetryResult = await new Promise((resolve, reject) => {
       goproTelemetry(extracted, { repeatSticky: true }, (data: GoproTelemetryResult) => {
@@ -199,9 +206,78 @@ interface Mp4BoxLike {
 }
 
 /**
- * Stream a large MP4 into gpmf-extract and surface read/parse failures
- * to the caller instead of silently returning empty telemetry.
+ * gpmf-extract can throw synchronously inside mp4box callbacks (e.g.
+ * Buffer.alloc when memory is tight). That bypasses promise rejection and
+ * leaves IPC handlers without a reply — catch those during extraction.
  */
+function withGpmfExtractionGuard<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const onUncaught = (err: Error) => {
+      cleanup();
+      reject(err);
+    };
+    const cleanup = () => process.off('uncaughtException', onUncaught);
+    process.on('uncaughtException', onUncaught);
+    fn().then(
+      (value) => { cleanup(); resolve(value); },
+      (err) => { cleanup(); reject(err); },
+    );
+  });
+}
+
+function pickGpmdStream(probe: FfprobeResult) {
+  return pickDataStreams(probe).find((s) => {
+    if (s.codec_tag_string === 'gpmd') return true;
+    if (s.handler_name && /gopro met/i.test(s.handler_name)) return true;
+    return false;
+  });
+}
+
+async function runFfmpeg(args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`));
+    });
+  });
+}
+
+/**
+ * Demux only the gpmd metadata track with ffmpeg, then parse the small
+ * sidecar file with gpmf-extract. Peak memory stays low even for multi-GB
+ * source clips.
+ */
+async function extractGpmfViaFfmpeg(
+  filePath: string,
+  gpmfExtract: GpmfExtractFn,
+): Promise<GpmfExtractResult> {
+  const probe = await ffprobe(filePath);
+  const gpmd = pickGpmdStream(probe);
+  if (!gpmd) throw new Error('No GPMF (gpmd) metadata stream found');
+
+  const tempDir = await mkdtemp(join(tmpdir(), 'dg-gpmd-'));
+  const outPath = join(tempDir, 'gpmd.mp4');
+  try {
+    await runFfmpeg([
+      '-nostdin',
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-y',
+      '-i', filePath,
+      '-map', `0:${gpmd.index}`,
+      '-c', 'copy',
+      outPath,
+    ]);
+    return await gpmfExtract(await readFile(outPath));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function extractGpmfStreaming(
   filePath: string,
   gpmfExtract: GpmfExtractFn,
@@ -224,15 +300,9 @@ async function extractGpmfStreaming(
   });
 }
 
-async function readFileFully(filePath: string): Promise<Buffer> {
-  const { readFile } = await import('node:fs/promises');
-  return readFile(filePath);
-}
-
 /**
- * Stream a file from disk into mp4box.js in chunks. Used for >1.5 GB
- * GoPro recordings where Node's `fs.readFile` errors with
- * ERR_FS_FILE_TOO_LARGE.
+ * Stream a file from disk into mp4box.js in chunks. Fallback when ffmpeg
+ * demux fails; never loads the entire source clip into memory.
  *
  * mp4box.js requires each ArrayBuffer to carry its absolute byte
  * offset in a `fileStart` property — that's how the parser locates

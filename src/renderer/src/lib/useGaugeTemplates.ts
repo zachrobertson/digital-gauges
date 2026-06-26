@@ -1,12 +1,13 @@
-import { useCallback, useEffect } from 'react';
-import type { GaugeInstance, GaugeTemplateFile } from '@shared/types';
+import { useCallback, useEffect, useMemo } from 'react';
+import type { GaugeInstance, GaugeTemplateFile, GaugeTemplateSummary } from '@shared/types';
 import { findPluginById } from '../store/plugins';
 import { useProject } from '../store/project';
 import { useTemplateStore } from '../store/templates';
 import { buildLayoutFromTemplate, specFromGauge } from './gaugeFactory';
+import { builtinTemplate, builtinTemplateSummaries, isBuiltinTemplateId } from './builtinTemplates';
 
 export function useGaugeTemplates() {
-  const templates = useTemplateStore((s) => s.templates);
+  const diskTemplates = useTemplateStore((s) => s.templates);
   const refresh = useTemplateStore((s) => s.refresh);
   const project = useProject((s) => s.project);
   const addGauge = useProject((s) => s.addGauge);
@@ -15,6 +16,30 @@ export function useGaugeTemplates() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Bundled defaults appear first, followed by user-saved templates from disk.
+  const templates = useMemo<GaugeTemplateSummary[]>(
+    () => [
+      ...builtinTemplateSummaries(),
+      ...diskTemplates.map((t) => ({ ...t, source: t.source ?? ('user' as const) })),
+    ],
+    [diskTemplates],
+  );
+
+  const applyTemplateFile = useCallback(
+    (template: GaugeTemplateFile) => {
+      const project = useProject.getState().project;
+      const { gauges, skipped } = buildLayoutFromTemplate(template, project);
+      for (const g of gauges) addGauge(g);
+      if (gauges.length > 0) selectGauge(gauges[gauges.length - 1]!.id);
+      if (skipped.length > 0) {
+        alert(
+          `Skipped unsupported gauge(s) (pre-v4 format without composite elements): ${skipped.join(', ')}`,
+        );
+      }
+    },
+    [addGauge, selectGauge],
+  );
 
   const saveSingleTemplate = useCallback(async (gauge: GaugeInstance, name: string) => {
     const plugin = findPluginById(gauge.pluginId);
@@ -56,17 +81,18 @@ export function useGaugeTemplates() {
   }, [project.gauges, refresh]);
 
   const applyTemplate = useCallback(async (id: string) => {
+    if (isBuiltinTemplateId(id)) {
+      const builtin = builtinTemplate(id);
+      if (builtin) applyTemplateFile(builtin);
+      return;
+    }
     const template = await window.api.loadGaugeTemplate(id);
     if (!template) return;
-    const { gauges, skipped } = buildLayoutFromTemplate(template, project);
-    for (const g of gauges) addGauge(g);
-    if (gauges.length > 0) selectGauge(gauges[gauges.length - 1]!.id);
-    if (skipped.length > 0) {
-      alert(`Skipped unavailable gauge(s): ${skipped.join(', ')}`);
-    }
-  }, [addGauge, project, selectGauge]);
+    applyTemplateFile(template);
+  }, [applyTemplateFile]);
 
   const deleteTemplate = useCallback(async (id: string) => {
+    if (isBuiltinTemplateId(id)) return;
     await window.api.deleteGaugeTemplate(id);
     await refresh();
   }, [refresh]);

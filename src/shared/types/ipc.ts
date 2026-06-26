@@ -10,7 +10,7 @@ export type { GaugeTemplateFile, GaugeTemplateSummary };
  * object that maps 1:1 to this interface.
  */
 export interface DigitalGaugesApi {
-  pickVideoFile(): Promise<string | null>;
+  pickVideoFile(): Promise<string[]>;
   pickFitFile(): Promise<string | null>;
   pickExportPath(defaultName: string): Promise<string | null>;
   pickProjectFile(): Promise<string | null>;
@@ -29,6 +29,8 @@ export interface DigitalGaugesApi {
   clearDraft(): Promise<void>;
 
   startExport(project: Project): Promise<ExportStartResult>;
+  startExportSegment(jobId: string, clipIndex: number): Promise<{ framesExpected: number }>;
+  finishExportSegment(jobId: string): Promise<void>;
   cancelExport(jobId: string): Promise<void>;
   onExportProgress(handler: (p: ExportProgress) => void): () => void;
   onExportDone(handler: (r: ExportResult) => void): () => void;
@@ -36,6 +38,9 @@ export interface DigitalGaugesApi {
   /** Renderer streams raw RGBA frames into the export pipeline. */
   sendExportFrame(jobId: string, frame: ArrayBuffer): Promise<void>;
   finishExportFrames(jobId: string): Promise<void>;
+
+  /** Build one preview file (trim + concat as needed) for playback. */
+  buildPreviewVideo(segments: PreviewSegment[]): Promise<{ path: string }>;
 
   listUserPlugins(): Promise<UserPluginInfo[]>;
   openUserPluginsFolder(): Promise<void>;
@@ -48,6 +53,14 @@ export interface DigitalGaugesApi {
   deleteGaugeTemplate(id: string): Promise<void>;
   importGaugeTemplate(): Promise<GaugeTemplateFile | null>;
   exportGaugeTemplate(id: string): Promise<string | null>;
+}
+
+/** One clip segment for the preview builder, with trim window (source ms). */
+export interface PreviewSegment {
+  path: string;
+  inMs: number;
+  outMs: number;
+  durationMs: number;
 }
 
 export interface VideoProbe {
@@ -69,6 +82,7 @@ export interface ExportStartResult {
   width: number;
   height: number;
   durationMs: number;
+  segmentCount: number;
 }
 
 export interface ExportProgress {

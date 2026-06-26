@@ -15,7 +15,15 @@ import { ColorInput } from './ColorInput';
  * Config panel for the selected gauge. Bar/arc gauges use the interactive
  * GaugeEditor; other plugins fall back to JSON Schema-driven fields.
  */
-export function ConfigPanel() {
+export function ConfigPanel({
+  showPreview = true,
+  selectedElementIds,
+  onSelectElements,
+}: {
+  showPreview?: boolean;
+  selectedElementIds?: string[];
+  onSelectElements?: (ids: string[]) => void;
+} = {}) {
   const selectedId = useProject((s) => s.selectedGaugeId);
   const gauge = useProject((s) =>
     selectedId ? s.project.gauges.find((g) => g.id === selectedId) : null,
@@ -69,6 +77,9 @@ export function ConfigPanel() {
       plugin={plugin}
       updateGauge={updateGauge}
       removeGauge={removeGauge}
+      showPreview={showPreview}
+      selectedElementIds={selectedElementIds}
+      onSelectElements={onSelectElements}
       onSaveTemplate={isDataGaugePlugin(gauge.pluginId) ? () => void onSaveTemplate() : undefined}
     />
     <NamePromptDialog
@@ -91,17 +102,26 @@ function ConfigPanelBody({
   updateGauge,
   removeGauge,
   onSaveTemplate,
+  showPreview = true,
+  selectedElementIds,
+  onSelectElements,
 }: {
   gauge: GaugeInstance;
   plugin: GaugePlugin;
   updateGauge: (id: string, patch: Partial<GaugeInstance>) => void;
   removeGauge: (id: string) => void;
   onSaveTemplate?: () => void;
+  showPreview?: boolean;
+  selectedElementIds?: string[];
+  onSelectElements?: (ids: string[]) => void;
 }) {
   const merged = { ...plugin.defaultConfig, ...gauge.config };
 
   const onConfigChange = useCallback(
-    (patch: Record<string, unknown>) => updateGauge(gauge.id, { config: { ...gauge.config, ...patch } }),
+    (patch: Record<string, unknown>) => {
+      const current = useProject.getState().project.gauges.find((g) => g.id === gauge.id);
+      updateGauge(gauge.id, { config: { ...(current?.config ?? gauge.config), ...patch } });
+    },
     [gauge.id, gauge.config, updateGauge],
   );
   const onRectChange = useCallback(
@@ -119,6 +139,9 @@ function ConfigPanelBody({
         onRectChange={onRectChange}
         onRemove={() => removeGauge(gauge.id)}
         onSaveTemplate={onSaveTemplate}
+        showPreview={showPreview}
+        selectedElementIds={selectedElementIds}
+        onSelectElements={onSelectElements}
         renderDataField={(key, prop, value, onChange) => (
           <Field key={key} name={key} prop={prop} value={value} onChange={onChange} />
         )}
@@ -205,7 +228,7 @@ function Field({ name, prop, value, onChange }: FieldProps) {
   if (prop.type === 'string' && prop.format === 'font') {
     const options = prop.enum?.length ? prop.enum.map(String) : [...FONT_PRESETS];
     return (
-      <div className="relative z-20 flex flex-col gap-1">
+      <div className="relative flex flex-col gap-1">
         <label className="field-label">{title}</label>
         {hint}
         <select className="select-input" value={String(v ?? options[0])} onChange={(e) => onChange(e.target.value)}>
@@ -218,7 +241,7 @@ function Field({ name, prop, value, onChange }: FieldProps) {
   if (prop.enum || prop.format === 'select') {
     const options = prop.enum ?? [];
     return (
-      <div className="relative z-20 flex flex-col gap-1">
+      <div className="relative flex flex-col gap-1">
         <label className="field-label">{title}</label>
         {hint}
         <select className="select-input" value={String(v ?? '')} onChange={(e) => onChange(coerce(prop.type, e.target.value))}>

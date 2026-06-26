@@ -85,4 +85,11 @@ export interface GaugeInstance {
   z: number;
   rect: GaugeRect;
   config: Record<string, unknown>;
+  /**
+   * Whether this gauge is placed on the video (rendered in the live overlay and
+   * burned into the export). Configured gauges default to unplaced until the
+   * user adds them to the video in the Edit workspace. Absent = placed (legacy
+   * projects, where every gauge was always on the video).
+   */
+  placed?: boolean;
 }

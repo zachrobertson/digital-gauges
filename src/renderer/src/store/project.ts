@@ -1,563 +1,849 @@
 import { create } from 'zustand';
-
-import type { GaugeInstance, Project, SyncAnchor, TelemetryTrack } from '@shared/types';
-
-import { frameAtVideoTime } from '../lib/telemetry';
-
+import type {
+  GaugeInstance,
+  MediaSource,
+  Project,
+  SyncAnchor,
+  TelemetryTrack,
+  TimelineClip,
+  VideoOverlayAlignMode,
+  VideoOverlayClip,
+} from '@shared/types';
 import {
-
+  assignClipTimelinePositions,
+  clipAtGlobalTime,
+  clipDurationMs,
+  clipInMs,
+  clipOutMs,
+  clipStartGlobalMs,
+  globalTimeFromClipLocal,
+  projectDurationMs,
+  timelineEndMs,
+} from '@shared/timeline';
+import { frameAtGlobalTime } from '../lib/telemetry';
+import {
   computeOffsetFromAnchor,
-
+  computeTimestampOverlayOffset,
   defaultCameraTrackSync,
-
   defaultFitTrackSync,
-
+  defaultFitTrackSyncForClip,
+  effectiveSharedFitOffsetMs,
   pickCameraTrack,
-
-  refreshAnchoredTrackSync,
-
+  refreshClipSharedTrackSync,
+  repairSharedFitSync,
+  rechainedSharedFitSyncFrom,
+  videoUtcMs,
 } from '@shared/sync';
-
-
 
 const newId = () => crypto.randomUUID();
 
-
+/** UI-only workspace tabs. Not part of the serialized Project. */
+export type WorkspaceMode = 'edit' | 'sync' | 'gauges' | 'export';
 
 function emptyProject(): Project {
-
   return {
-
-    version: 1,
-
+    version: 5,
     id: newId(),
-
     name: 'Untitled Ride',
-
     createdAt: new Date().toISOString(),
-
     updatedAt: new Date().toISOString(),
-
-    video: null,
-
-    tracks: [],
-
-    trackSync: {},
-
+    clips: [],
+    overlays: [],
+    sharedTracks: [],
     gauges: [],
-
-    export: { codec: 'h264', crf: 18, fps: 30, resolution: 'source', outputPath: null },
-
+    export: { codec: 'h264', crf: 18, fps: 30, resolution: 'source', includeAudio: true, outputPath: null },
   };
-
 }
 
+function emptyClip(media: MediaSource): TimelineClip {
+  return {
+    id: newId(),
+    media,
+    localTracks: [],
+    localTrackSync: {},
+    sharedTrackSync: {},
+    inMs: 0,
+    outMs: media.durationMs,
+  };
+}
 
+/** Recompute chained shared-FIT offsets for every FIT track from a clip onward. */
+function rechainAllSharedFit(
+  clips: TimelineClip[],
+  sharedTracks: TelemetryTrack[],
+  fromClipIndex: number,
+): TimelineClip[] {
+  let next = clips;
+  for (const t of sharedTracks) {
+    if (t.source !== 'fit') continue;
+    next = rechainedSharedFitSyncFrom(next, t.id, fromClipIndex);
+  }
+  return next;
+}
+
+function seedSharedSyncForClip(
+  clip: TimelineClip,
+  clipIndex: number,
+  allClips: TimelineClip[],
+  sharedTracks: TelemetryTrack[],
+): TimelineClip {
+  const camera = pickCameraTrack(clip.localTracks);
+  const sharedTrackSync = { ...clip.sharedTrackSync };
+  for (const t of sharedTracks) {
+    if (t.source !== 'fit') continue;
+    if (!sharedTrackSync[t.id]) {
+      sharedTrackSync[t.id] = defaultFitTrackSyncForClip(allClips, clipIndex, t, camera);
+    }
+  }
+  return { ...clip, sharedTrackSync };
+}
+
+function updateClip(
+  clips: TimelineClip[],
+  clipId: string,
+  patch: Partial<TimelineClip> | ((c: TimelineClip) => TimelineClip),
+): TimelineClip[] {
+  return clips.map((c) => {
+    if (c.id !== clipId) return c;
+    return typeof patch === 'function' ? patch(c) : { ...c, ...patch };
+  });
+}
+
+function updateOverlay(
+  overlays: VideoOverlayClip[],
+  overlayId: string,
+  patch: Partial<VideoOverlayClip> | ((o: VideoOverlayClip) => VideoOverlayClip),
+): VideoOverlayClip[] {
+  return overlays.map((o) => {
+    if (o.id !== overlayId) return o;
+    return typeof patch === 'function' ? patch(o) : { ...o, ...patch };
+  });
+}
+
+function defaultOverlayRect(): VideoOverlayClip['rect'] {
+  return { x: 0.65, y: 0.65, w: 0.3, h: 0.3 };
+}
+
+function nextOverlayZ(overlays: VideoOverlayClip[]): number {
+  if (overlays.length === 0) return 0;
+  return Math.max(...overlays.map((o) => o.z)) + 1;
+}
 
 interface ProjectState {
-
   project: Project;
-
-  /** Path of the last explicitly saved/opened .dgproj file, if any. */
-
   projectFilePath: string | null;
-
   selectedGaugeId: string | null;
-
-  playhead: number;   // ms since start of video
-
+  /** Selected clip for sync editing. Defaults to first clip. */
+  selectedClipId: string | null;
+  /** Selected overlay for edit timeline / inspector. */
+  selectedOverlayId: string | null;
+  playhead: number;
   playing: boolean;
+  /** UI-only active workspace tab — never serialized into a project file. */
+  workspaceMode: WorkspaceMode;
+  /** UI-only global "processing…" message (probing, parsing FIT, etc). */
+  busyMessage: string | null;
+  /** True when clip concat differs from the last successfully built preview. */
+  previewStale: boolean;
+  /** True while dragging a base-clip trim handle. */
+  trimInProgress: boolean;
+  /** True while an ffmpeg preview build is in flight. */
+  previewBuilding: boolean;
+  /** clipKey of the last successfully built preview concat. */
+  lastPreviewClipKey: string;
+  /** Incremented to trigger a manual preview rebuild from usePreviewVideo. */
+  previewGeneration: number;
 
-
-
+  setWorkspaceMode(mode: WorkspaceMode): void;
+  setBusyMessage(message: string | null): void;
   setProject(p: Project): void;
-
   setProjectFilePath(path: string | null): void;
-
   resetProject(): void;
 
-  setVideo(p: Project['video']): void;
+  addClip(media: MediaSource, localTracks?: TelemetryTrack[]): void;
+  removeClip(id: string): void;
+  reorderClips(ids: string[]): void;
+  selectClip(id: string | null): void;
 
+  /** Set trim in/out (source ms) for a clip. */
+  setClipTrim(clipId: string, inMs: number, outMs: number): void;
+  /** Move a clip along the global timeline without changing trim or order. */
+  setClipStartGlobalMs(clipId: string, startGlobalMs: number): void;
+  markPreviewStale(): void;
+  beginTrim(): void;
+  endTrim(): void;
+  generatePreview(): void;
+  completePreviewBuild(clipKey: string): void;
+  failPreviewBuild(): void;
+  /** Split the clip under the global playhead into two clips. */
+  splitClipAtPlayhead(): void;
+  /** Remove a clip and pull later clips earlier (ripple). */
+  rippleDeleteClip(clipId: string): void;
 
+  addOverlay(media: MediaSource, startGlobalMs?: number): void;
+  removeOverlay(id: string): void;
+  selectOverlay(id: string | null): void;
+  setOverlayWindow(id: string, startGlobalMs: number, endGlobalMs: number): void;
+  setOverlaySourceTrim(id: string, inMs: number, outMs: number): void;
+  setOverlayAlignMode(id: string, mode: VideoOverlayAlignMode): void;
+  setOverlayOffset(id: string, offsetMs: number): void;
+  autoAlignOverlayTimestamps(id: string): void;
+  setOverlayRect(id: string, rect: VideoOverlayClip['rect']): void;
+  setOverlayZ(id: string, z: number): void;
+  moveOverlayZ(id: string, direction: 'up' | 'down'): void;
+  setOverlayIncludeAudio(id: string, include: boolean): void;
 
-  addTrack(t: TelemetryTrack): void;
+  addSharedTrack(t: TelemetryTrack): void;
+  removeSharedTrack(id: string): void;
+  addClipLocalTrack(clipId: string, t: TelemetryTrack): void;
+  removeClipLocalTrack(clipId: string, trackId: string): void;
 
-  removeTrack(id: string): void;
-
-  setOffset(id: string, ms: number): void;
-
-  setTrackAnchor(id: string, anchor: SyncAnchor): void;
-
-
+  setClipOffset(clipId: string, trackId: string, ms: number, scope: 'local' | 'shared'): void;
+  setClipTrackAnchor(clipId: string, trackId: string, anchor: SyncAnchor, scope: 'local' | 'shared'): void;
 
   addGauge(g: GaugeInstance): void;
-
   updateGauge(id: string, patch: Partial<GaugeInstance>): void;
-
   removeGauge(id: string): void;
-
   selectGauge(id: string | null): void;
 
-
-
   setPlayhead(ms: number): void;
-
   setPlaying(playing: boolean): void;
 
-
-
   setExport(patch: Partial<Project['export']>): void;
-
   setCourseDistance(field: 'start' | 'finish', meters: number | null): void;
-
-  setCourseMarker(field: 'start' | 'finish', videoTimeMs: number): boolean;
-
+  setCourseMarker(field: 'start' | 'finish', globalTimeMs: number): boolean;
   clearCourseMarker(field: 'start' | 'finish'): void;
-
 }
 
-
-
 export const useProject = create<ProjectState>((set) => ({
-
   project: emptyProject(),
-
   projectFilePath: null,
-
   selectedGaugeId: null,
-
+  selectedClipId: null,
+  selectedOverlayId: null,
   playhead: 0,
-
   playing: false,
+  workspaceMode: 'edit',
+  busyMessage: null,
+  previewStale: false,
+  trimInProgress: false,
+  previewBuilding: false,
+  lastPreviewClipKey: '',
+  previewGeneration: 0,
 
+  setWorkspaceMode: (mode) => set({ workspaceMode: mode }),
+  setBusyMessage: (message) => set({ busyMessage: message }),
 
-
-  setProject: (p) => set({ project: p, selectedGaugeId: null, playhead: 0, playing: false }),
+  setProject: (p) => {
+    const normalized = { ...p, version: 5 as const, overlays: p.overlays ?? [] };
+    let clips = assignClipTimelinePositions(normalized.clips);
+    clips = repairSharedFitSync(clips, normalized.sharedTracks);
+    const project = { ...normalized, clips };
+    set({
+      project,
+      selectedGaugeId: null,
+      selectedClipId: project.clips[0]?.id ?? null,
+      selectedOverlayId: null,
+      playhead: 0,
+      playing: false,
+      previewStale: false,
+      trimInProgress: false,
+      previewBuilding: false,
+      lastPreviewClipKey: '',
+      previewGeneration: 0,
+    });
+  },
 
   setProjectFilePath: (path) => set({ projectFilePath: path }),
 
-  resetProject: () =>
+  resetProject: () => set({
+    project: emptyProject(),
+    projectFilePath: null,
+    selectedGaugeId: null,
+    selectedClipId: null,
+    selectedOverlayId: null,
+    playhead: 0,
+    playing: false,
+    previewStale: false,
+    trimInProgress: false,
+    previewBuilding: false,
+    lastPreviewClipKey: '',
+    previewGeneration: 0,
+  }),
 
-    set({
+  addClip: (media, localTracks = []) => set((s) => {
+    const startGlobalMs = timelineEndMs(s.project.clips);
+    let clip: TimelineClip = { ...emptyClip(media), startGlobalMs };
+    const localTrackSync: Record<string, import('@shared/types').TrackSyncSettings> = {};
+    for (const t of localTracks) {
+      if (t.source === 'fit') {
+        localTrackSync[t.id] = defaultFitTrackSync(media, t, pickCameraTrack(localTracks));
+      } else {
+        localTrackSync[t.id] = defaultCameraTrackSync();
+      }
+    }
+    clip = { ...clip, localTracks, localTrackSync };
+    const clipIndex = s.project.clips.length;
+    const allClips = [...s.project.clips, clip];
+    clip = seedSharedSyncForClip(clip, clipIndex, allClips, s.project.sharedTracks);
 
-      project: emptyProject(),
+    const clips = [...s.project.clips, clip];
+    const markStale = s.lastPreviewClipKey !== '';
+    return {
+      project: {
+        ...s.project,
+        clips,
+        updatedAt: new Date().toISOString(),
+      },
+      selectedClipId: s.selectedClipId ?? clip.id,
+      ...(markStale ? { previewStale: true, playing: false } : {}),
+    };
+  }),
 
-      projectFilePath: null,
+  removeClip: (id) => set((s) => {
+    const clips = s.project.clips.filter((c) => c.id !== id);
+    const total = projectDurationMs(clips, s.project.overlays);
+    const playhead = Math.min(s.playhead, Math.max(0, total));
+    const selectedClipId = s.selectedClipId === id
+      ? (clips[0]?.id ?? null)
+      : s.selectedClipId;
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+      playhead,
+      selectedClipId,
+      previewStale: s.lastPreviewClipKey !== '' ? true : s.previewStale,
+      playing: s.lastPreviewClipKey !== '' ? false : s.playing,
+    };
+  }),
 
-      selectedGaugeId: null,
+  reorderClips: (ids) => set((s) => {
+    const byId = new Map(s.project.clips.map((c) => [c.id, c]));
+    const clips = ids.map((id) => byId.get(id)).filter((c): c is TimelineClip => c != null);
+    if (clips.length !== s.project.clips.length) return s;
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+      previewStale: s.lastPreviewClipKey !== '' ? true : s.previewStale,
+      playing: s.lastPreviewClipKey !== '' ? false : s.playing,
+    };
+  }),
 
-      playhead: 0,
+  selectClip: (id) => set({ selectedClipId: id, selectedOverlayId: id ? null : useProject.getState().selectedOverlayId }),
 
-      playing: false,
+  setClipTrim: (clipId, inMs, outMs) => set((s) => {
+    const MIN_TRIM_MS = 100;
+    const clipIndex = s.project.clips.findIndex((c) => c.id === clipId);
+    if (clipIndex < 0) return s;
+    const target = s.project.clips[clipIndex]!;
+    const dur = target.media.durationMs;
+    const nextIn = Math.max(0, Math.min(inMs, dur - MIN_TRIM_MS));
+    const nextOut = Math.max(nextIn + MIN_TRIM_MS, Math.min(outMs, dur));
 
-    }),
+    let clips = updateClip(s.project.clips, clipId, (c) => {
+      // Trimming only changes which source range of the video plays — it must not
+      // trim or shift the FIT telemetry. Keep the clip anchored at its existing
+      // global start so a head-trim slides its content to that start (no leading
+      // gap) instead of opening a telemetry gap where gauges would disappear. FIT
+      // is sampled against source time (clipInMs + localMs), so the FIT↔video sync
+      // is preserved and the shared FIT frames are never sliced.
+      const startGlobalMs = clipStartGlobalMs(s.project.clips, clipIndex);
+      return { ...c, inMs: nextIn, outMs: nextOut, startGlobalMs };
+    });
+    clips = rechainAllSharedFit(clips, s.project.sharedTracks, clipIndex);
 
+    const total = projectDurationMs(clips, s.project.overlays);
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+      playhead: Math.min(s.playhead, Math.max(0, total)),
+      previewStale: s.lastPreviewClipKey !== '' ? true : s.previewStale,
+      playing: s.lastPreviewClipKey !== '' ? false : s.playing,
+    };
+  }),
 
+  setClipStartGlobalMs: (clipId, startGlobalMs) => set((s) => {
+    const clips = updateClip(s.project.clips, clipId, (c) => ({
+      ...c,
+      startGlobalMs: Math.max(0, startGlobalMs),
+    }));
+    const total = projectDurationMs(clips, s.project.overlays);
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+      playhead: Math.min(s.playhead, Math.max(0, total)),
+    };
+  }),
 
-  setVideo: (video) =>
+  markPreviewStale: () => set((s) => ({
+    previewStale: s.lastPreviewClipKey !== '' ? true : s.previewStale,
+    playing: false,
+  })),
 
-    set((s) => {
+  beginTrim: () => set((s) => ({
+    trimInProgress: true,
+    previewStale: s.lastPreviewClipKey !== '' ? true : s.previewStale,
+    playing: false,
+  })),
 
-      const tracks = s.project.tracks;
+  endTrim: () => set({ trimInProgress: false }),
 
-      const camera = pickCameraTrack(tracks);
+  generatePreview: () => set((s) => ({
+    previewBuilding: true,
+    previewGeneration: s.previewGeneration + 1,
+    playing: false,
+  })),
 
-      const trackSync = refreshAnchoredTrackSync(s.project.trackSync, tracks, video, camera);
+  completePreviewBuild: (clipKey) => set({
+    lastPreviewClipKey: clipKey,
+    previewStale: false,
+    previewBuilding: false,
+  }),
 
-      return {
+  failPreviewBuild: () => set({ previewBuilding: false }),
 
-        project: {
+  splitClipAtPlayhead: () => set((s) => {
+    const loc = clipAtGlobalTime(s.project.clips, s.playhead);
+    if (!loc) return s;
+    const { clip, clipIndex, localMs } = loc;
+    const inMs = clipInMs(clip);
+    const outMs = clipOutMs(clip);
+    const splitSourceMs = inMs + localMs;
+    // Need a meaningful slice on both sides.
+    if (splitSourceMs - inMs < 100 || outMs - splitSourceMs < 100) return s;
 
-          ...s.project,
-
-          video,
-
-          trackSync,
-
-          updatedAt: new Date().toISOString(),
-
-        },
-
+    const splitGlobalMs = globalTimeFromClipLocal(s.project.clips, clipIndex, localMs);
+    const firstHalf: TimelineClip = { ...clip, outMs: splitSourceMs };
+    const secondHalf: TimelineClip = {
+      ...clip,
+      id: newId(),
+      inMs: splitSourceMs,
+      outMs,
+      startGlobalMs: splitGlobalMs,
+      localTrackSync: { ...clip.localTrackSync },
+      sharedTrackSync: { ...clip.sharedTrackSync },
+    };
+    // Pin the second half's shared FIT so the ride time stays continuous.
+    for (const t of s.project.sharedTracks) {
+      if (t.source !== 'fit') continue;
+      const prev = clip.sharedTrackSync[t.id];
+      const effOffset = effectiveSharedFitOffsetMs(s.project.clips, clipIndex, t.id);
+      secondHalf.sharedTrackSync[t.id] = {
+        offsetMs: effOffset,
+        playSpeedPercent: prev?.playSpeedPercent ?? 100,
+        anchor: 'manual',
       };
+    }
 
-    }),
+    let clips = [
+      ...s.project.clips.slice(0, clipIndex),
+      firstHalf,
+      secondHalf,
+      ...s.project.clips.slice(clipIndex + 1),
+    ];
+    clips = rechainAllSharedFit(clips, s.project.sharedTracks, clipIndex + 1);
 
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+      selectedClipId: secondHalf.id,
+      previewStale: s.lastPreviewClipKey !== '' ? true : s.previewStale,
+      playing: false,
+    };
+  }),
 
+  rippleDeleteClip: (clipId) => set((s) => {
+    const clipIndex = s.project.clips.findIndex((c) => c.id === clipId);
+    if (clipIndex < 0) return s;
+    let clips = s.project.clips.filter((c) => c.id !== clipId);
+    clips = rechainAllSharedFit(clips, s.project.sharedTracks, Math.max(0, clipIndex - 1));
+    const total = projectDurationMs(clips, s.project.overlays);
+    const selectedClipId = s.selectedClipId === clipId
+      ? (clips[Math.min(clipIndex, clips.length - 1)]?.id ?? null)
+      : s.selectedClipId;
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+      playhead: Math.min(s.playhead, Math.max(0, total)),
+      selectedClipId,
+      previewStale: s.lastPreviewClipKey !== '' ? true : s.previewStale,
+      playing: false,
+    };
+  }),
 
-  addTrack: (t) =>
+  addOverlay: (media, startGlobalMs) => set((s) => {
+    const start = startGlobalMs ?? s.playhead;
+    const visibleDur = Math.min(media.durationMs, Math.max(1000, media.durationMs));
+    const end = start + visibleDur;
+    const hasUtc = videoUtcMs(media) != null;
+    const alignMode: VideoOverlayAlignMode = hasUtc ? 'timestamp' : 'manual';
+    let overlay: VideoOverlayClip = {
+      id: newId(),
+      media,
+      startGlobalMs: Math.max(0, start),
+      endGlobalMs: end,
+      inMs: 0,
+      outMs: media.durationMs,
+      alignMode,
+      offsetMs: 0,
+      rect: defaultOverlayRect(),
+      z: nextOverlayZ(s.project.overlays),
+      includeAudio: false,
+      opacity: 1,
+    };
+    if (alignMode === 'timestamp') {
+      const offset = computeTimestampOverlayOffset(s.project.clips, overlay, overlay.startGlobalMs);
+      if (offset != null) overlay = { ...overlay, offsetMs: offset };
+    }
+    return {
+      project: {
+        ...s.project,
+        overlays: [...s.project.overlays, overlay],
+        updatedAt: new Date().toISOString(),
+      },
+      selectedOverlayId: overlay.id,
+      selectedClipId: null,
+    };
+  }),
 
-    set((s) => {
+  removeOverlay: (id) => set((s) => {
+    const overlays = s.project.overlays.filter((o) => o.id !== id);
+    const total = projectDurationMs(s.project.clips, overlays);
+    return {
+      project: { ...s.project, overlays, updatedAt: new Date().toISOString() },
+      selectedOverlayId: s.selectedOverlayId === id ? null : s.selectedOverlayId,
+      playhead: Math.min(s.playhead, Math.max(0, total)),
+    };
+  }),
 
-      const tracks = [...s.project.tracks, t];
+  selectOverlay: (id) => set({ selectedOverlayId: id, selectedClipId: id ? null : useProject.getState().selectedClipId }),
 
-      const camera = pickCameraTrack(tracks);
+  setOverlayWindow: (id, startGlobalMs, endGlobalMs) => set((s) => {
+    const MIN_MS = 100;
+    const overlays = updateOverlay(s.project.overlays, id, (o) => {
+      const start = Math.max(0, startGlobalMs);
+      const end = Math.max(start + MIN_MS, endGlobalMs);
+      return { ...o, startGlobalMs: start, endGlobalMs: end };
+    });
+    const total = projectDurationMs(s.project.clips, overlays);
+    return {
+      project: { ...s.project, overlays, updatedAt: new Date().toISOString() },
+      playhead: Math.min(s.playhead, Math.max(0, total)),
+    };
+  }),
 
-      const trackSync = { ...s.project.trackSync };
+  setOverlaySourceTrim: (id, inMs, outMs) => set((s) => {
+    const MIN_TRIM_MS = 100;
+    const overlays = updateOverlay(s.project.overlays, id, (o) => {
+      const dur = o.media.durationMs;
+      const nextIn = Math.max(0, Math.min(inMs, dur - MIN_TRIM_MS));
+      const nextOut = Math.max(nextIn + MIN_TRIM_MS, Math.min(outMs, dur));
+      return { ...o, inMs: nextIn, outMs: nextOut };
+    });
+    return {
+      project: { ...s.project, overlays, updatedAt: new Date().toISOString() },
+    };
+  }),
 
+  setOverlayAlignMode: (id, mode) => set((s) => {
+    const overlays = updateOverlay(s.project.overlays, id, (o) => {
+      if (mode === o.alignMode) return o;
+      if (mode === 'timestamp') {
+        const offset = computeTimestampOverlayOffset(s.project.clips, o, o.startGlobalMs);
+        return { ...o, alignMode: mode, offsetMs: offset ?? o.offsetMs ?? 0 };
+      }
+      return { ...o, alignMode: mode };
+    });
+    return {
+      project: { ...s.project, overlays, updatedAt: new Date().toISOString() },
+    };
+  }),
 
+  setOverlayOffset: (id, offsetMs) => set((s) => ({
+    project: {
+      ...s.project,
+      overlays: updateOverlay(s.project.overlays, id, (o) => ({ ...o, offsetMs })),
+      updatedAt: new Date().toISOString(),
+    },
+  })),
+
+  autoAlignOverlayTimestamps: (id) => set((s) => {
+    const overlays = updateOverlay(s.project.overlays, id, (o) => {
+      const offset = computeTimestampOverlayOffset(s.project.clips, o, o.startGlobalMs);
+      if (offset == null) return o;
+      return { ...o, alignMode: 'timestamp', offsetMs: offset };
+    });
+    return {
+      project: { ...s.project, overlays, updatedAt: new Date().toISOString() },
+    };
+  }),
+
+  setOverlayRect: (id, rect) => set((s) => ({
+    project: {
+      ...s.project,
+      overlays: updateOverlay(s.project.overlays, id, (o) => ({ ...o, rect })),
+      updatedAt: new Date().toISOString(),
+    },
+  })),
+
+  setOverlayZ: (id, z) => set((s) => ({
+    project: {
+      ...s.project,
+      overlays: updateOverlay(s.project.overlays, id, (o) => ({ ...o, z })),
+      updatedAt: new Date().toISOString(),
+    },
+  })),
+
+  moveOverlayZ: (id, direction) => set((s) => {
+    const sorted = [...s.project.overlays].sort((a, b) => a.z - b.z);
+    const idx = sorted.findIndex((o) => o.id === id);
+    if (idx < 0) return s;
+    const swapIdx = direction === 'up' ? idx + 1 : idx - 1;
+    if (swapIdx < 0 || swapIdx >= sorted.length) return s;
+    const a = sorted[idx]!;
+    const b = sorted[swapIdx]!;
+    const overlays = s.project.overlays.map((o) => {
+      if (o.id === a.id) return { ...o, z: b.z };
+      if (o.id === b.id) return { ...o, z: a.z };
+      return o;
+    });
+    return {
+      project: { ...s.project, overlays, updatedAt: new Date().toISOString() },
+    };
+  }),
+
+  setOverlayIncludeAudio: (id, include) => set((s) => ({
+    project: {
+      ...s.project,
+      overlays: updateOverlay(s.project.overlays, id, (o) => ({ ...o, includeAudio: include })),
+      updatedAt: new Date().toISOString(),
+    },
+  })),
+
+  addSharedTrack: (t) => set((s) => {
+    const sharedTracks = [...s.project.sharedTracks, t];
+    const clips = s.project.clips.map((clip, clipIndex) => {
+      const camera = pickCameraTrack(clip.localTracks);
+      const sharedTrackSync = {
+        ...clip.sharedTrackSync,
+        [t.id]: defaultFitTrackSyncForClip(s.project.clips, clipIndex, t, camera),
+      };
+      return { ...clip, sharedTrackSync };
+    });
+    return {
+      project: {
+        ...s.project,
+        sharedTracks,
+        clips,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }),
+
+  removeSharedTrack: (id) => set((s) => {
+    const clips = s.project.clips.map((clip) => {
+      const { [id]: _drop, ...sharedTrackSync } = clip.sharedTrackSync;
+      return { ...clip, sharedTrackSync };
+    });
+    return {
+      project: {
+        ...s.project,
+        sharedTracks: s.project.sharedTracks.filter((t) => t.id !== id),
+        clips,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }),
+
+  addClipLocalTrack: (clipId, t) => set((s) => {
+    let clips = updateClip(s.project.clips, clipId, (clip) => {
+      const localTracks = [...clip.localTracks, t];
+      const camera = pickCameraTrack(localTracks);
+      const localTrackSync = { ...clip.localTrackSync };
 
       if (t.source === 'fit') {
-
-        trackSync[t.id] = defaultFitTrackSync(s.project.video, t, camera);
-
+        localTrackSync[t.id] = defaultFitTrackSync(clip.media, t, camera);
       } else {
-
-        trackSync[t.id] = defaultCameraTrackSync();
-
+        localTrackSync[t.id] = defaultCameraTrackSync();
         if (camera && t.id === camera.id) {
-
-          for (const fit of tracks) {
-
-            if (fit.source !== 'fit') continue;
-
-            const sync = trackSync[fit.id];
-
-            if (sync && sync.anchor !== 'manual') {
-
-              trackSync[fit.id] = {
-
-                ...sync,
-
-                offsetMs: computeOffsetFromAnchor(sync.anchor, s.project.video, fit, camera),
-
-              };
-
-            } else if (!sync) {
-
-              trackSync[fit.id] = defaultFitTrackSync(s.project.video, fit, camera);
-
-            }
-
-          }
-
+          const clipIndex = s.project.clips.findIndex((c) => c.id === clipId);
+          const sharedTrackSync = refreshClipSharedTrackSync(
+            clip.sharedTrackSync,
+            s.project.sharedTracks,
+            clip.media,
+            localTracks,
+            clipIndex >= 0 ? clipIndex : undefined,
+            s.project.clips,
+          );
+          return { ...clip, localTracks, localTrackSync, sharedTrackSync };
         }
-
       }
 
+      return { ...clip, localTracks, localTrackSync };
+    });
+    clips = repairSharedFitSync(clips, s.project.sharedTracks);
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+    };
+  }),
 
-
+  removeClipLocalTrack: (clipId, trackId) => set((s) => {
+    const clips = updateClip(s.project.clips, clipId, (clip) => {
+      const { [trackId]: _drop, ...localTrackSync } = clip.localTrackSync;
       return {
-
-        project: {
-
-          ...s.project,
-
-          tracks,
-
-          trackSync,
-
-          updatedAt: new Date().toISOString(),
-
-        },
-
+        ...clip,
+        localTracks: clip.localTracks.filter((t) => t.id !== trackId),
+        localTrackSync,
       };
+    });
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+    };
+  }),
 
-    }),
-
-
-
-  removeTrack: (id) =>
-
-    set((s) => {
-
-      const { [id]: _drop, ...rest } = s.project.trackSync;
-
+  setClipOffset: (clipId, trackId, ms, scope) => set((s) => {
+    const syncKey = scope === 'local' ? 'localTrackSync' : 'sharedTrackSync';
+    let clips = updateClip(s.project.clips, clipId, (clip) => {
+      const prev = clip[syncKey][trackId];
       return {
-
-        project: {
-
-          ...s.project,
-
-          tracks: s.project.tracks.filter((t) => t.id !== id),
-
-          trackSync: rest,
-
-          updatedAt: new Date().toISOString(),
-
-        },
-
-      };
-
-    }),
-
-
-
-  setOffset: (id, ms) =>
-
-    set((s) => {
-
-      const prev = s.project.trackSync[id];
-
-      return {
-
-        project: {
-
-          ...s.project,
-
-          trackSync: {
-
-            ...s.project.trackSync,
-
-            [id]: {
-
-              offsetMs: ms,
-
-              playSpeedPercent: prev?.playSpeedPercent ?? 100,
-
-              anchor: 'manual',
-
-            },
-
+        ...clip,
+        [syncKey]: {
+          ...clip[syncKey],
+          [trackId]: {
+            offsetMs: ms,
+            playSpeedPercent: prev?.playSpeedPercent ?? 100,
+            anchor: 'manual',
           },
-
-          updatedAt: new Date().toISOString(),
-
         },
-
       };
+    });
+    if (scope === 'shared') {
+      const fit = s.project.sharedTracks.find((t) => t.id === trackId && t.source === 'fit');
+      if (fit) {
+        const fromIndex = clips.findIndex((c) => c.id === clipId);
+        if (fromIndex >= 0) {
+          clips = rechainedSharedFitSyncFrom(clips, trackId, fromIndex);
+        }
+      }
+    }
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+    };
+  }),
 
-    }),
+  setClipTrackAnchor: (clipId, trackId, anchor, scope) => set((s) => {
+    const syncKey = scope === 'local' ? 'localTrackSync' : 'sharedTrackSync';
+    const trackList = scope === 'local'
+      ? s.project.clips.find((c) => c.id === clipId)?.localTracks
+      : s.project.sharedTracks;
+    const track = trackList?.find((t) => t.id === trackId);
+    if (!track) return s;
 
-
-
-  setTrackAnchor: (id, anchor) =>
-
-    set((s) => {
-
-      const track = s.project.tracks.find((t) => t.id === id);
-
-      if (!track) return s;
-
-      const prev = s.project.trackSync[id];
-
-      const camera = pickCameraTrack(s.project.tracks);
-
+    const clips = updateClip(s.project.clips, clipId, (clip) => {
+      const prev = clip[syncKey][trackId];
+      const camera = pickCameraTrack(clip.localTracks);
+      const clipIndex = s.project.clips.findIndex((c) => c.id === clipId);
       const offsetMs = anchor === 'manual'
-
         ? (prev?.offsetMs ?? 0)
-
-        : computeOffsetFromAnchor(anchor, s.project.video, track, camera);
-
+        : anchor === 'utc' && track.source === 'fit' && clipIndex >= 0
+          ? defaultFitTrackSyncForClip(s.project.clips, clipIndex, track, camera).offsetMs
+          : computeOffsetFromAnchor(anchor, clip.media, track, camera);
       return {
-
-        project: {
-
-          ...s.project,
-
-          trackSync: {
-
-            ...s.project.trackSync,
-
-            [id]: {
-
-              offsetMs,
-
-              playSpeedPercent: prev?.playSpeedPercent ?? 100,
-
-              anchor,
-
-            },
-
+        ...clip,
+        [syncKey]: {
+          ...clip[syncKey],
+          [trackId]: {
+            offsetMs,
+            playSpeedPercent: prev?.playSpeedPercent ?? 100,
+            anchor,
           },
-
-          updatedAt: new Date().toISOString(),
-
         },
-
       };
+    });
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+    };
+  }),
 
-    }),
+  addGauge: (g) => set((s) => ({
+    project: {
+      ...s.project,
+      gauges: [...s.project.gauges, g],
+      updatedAt: new Date().toISOString(),
+    },
+    selectedGaugeId: g.id,
+  })),
 
+  updateGauge: (id, patch) => set((s) => ({
+    project: {
+      ...s.project,
+      gauges: s.project.gauges.map((g) => (g.id === id ? { ...g, ...patch } : g)),
+      updatedAt: new Date().toISOString(),
+    },
+  })),
 
-
-  addGauge: (g) =>
-
-    set((s) => ({
-
-      project: {
-
-        ...s.project,
-
-        gauges: [...s.project.gauges, g],
-
-        updatedAt: new Date().toISOString(),
-
-      },
-
-      selectedGaugeId: g.id,
-
-    })),
-
-
-
-  updateGauge: (id, patch) =>
-
-    set((s) => ({
-
-      project: {
-
-        ...s.project,
-
-        gauges: s.project.gauges.map((g) => (g.id === id ? { ...g, ...patch } : g)),
-
-        updatedAt: new Date().toISOString(),
-
-      },
-
-    })),
-
-
-
-  removeGauge: (id) =>
-
-    set((s) => ({
-
-      project: {
-
-        ...s.project,
-
-        gauges: s.project.gauges.filter((g) => g.id !== id),
-
-        updatedAt: new Date().toISOString(),
-
-      },
-
-      selectedGaugeId: s.selectedGaugeId === id ? null : s.selectedGaugeId,
-
-    })),
-
-
+  removeGauge: (id) => set((s) => ({
+    project: {
+      ...s.project,
+      gauges: s.project.gauges.filter((g) => g.id !== id),
+      updatedAt: new Date().toISOString(),
+    },
+    selectedGaugeId: s.selectedGaugeId === id ? null : s.selectedGaugeId,
+  })),
 
   selectGauge: (id) => set({ selectedGaugeId: id }),
-
-  setPlayhead: (ms) => set({ playhead: ms }),
-
+  setPlayhead: (ms) => set((s) => {
+    const playhead = ms;
+    if (!s.playing) return { playhead };
+    const loc = clipAtGlobalTime(s.project.clips, playhead);
+    if (loc && loc.clip.id !== s.selectedClipId) {
+      return { playhead, selectedClipId: loc.clip.id };
+    }
+    return { playhead };
+  }),
   setPlaying: (playing) => set({ playing }),
 
+  setExport: (patch) => set((s) => ({
+    project: { ...s.project, export: { ...s.project.export, ...patch } },
+  })),
 
+  setCourseDistance: (field, meters) => set((s) => {
+    const prev = s.project.course ?? { startDistanceM: null, finishDistanceM: null };
+    const key = field === 'start' ? 'startDistanceM' : 'finishDistanceM';
+    return {
+      project: {
+        ...s.project,
+        course: { ...prev, [key]: meters },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }),
 
-  setExport: (patch) =>
-
-    set((s) => ({
-
-      project: { ...s.project, export: { ...s.project.export, ...patch } },
-
-    })),
-
-  setCourseDistance: (field, meters) =>
-
-    set((s) => {
-
-      const prev = s.project.course ?? {
-
-        startDistanceM: null,
-
-        finishDistanceM: null,
-
-      };
-
-      const key = field === 'start' ? 'startDistanceM' : 'finishDistanceM';
-
-      return {
-
-        project: {
-
-          ...s.project,
-
-          course: { ...prev, [key]: meters },
-
-          updatedAt: new Date().toISOString(),
-
-        },
-
-      };
-
-    }),
-
-  setCourseMarker: (field, videoTimeMs) => {
-
+  setCourseMarker: (field, globalTimeMs) => {
     const { project } = useProject.getState();
-
-    const frame = frameAtVideoTime(project, videoTimeMs);
-
+    const frame = frameAtGlobalTime(project, globalTimeMs);
     const distance = frame.distance;
-
     if (typeof distance !== 'number') return false;
 
-    const prev = project.course ?? {
-
-      startDistanceM: null,
-
-      finishDistanceM: null,
-
-    };
-
+    const prev = project.course ?? { startDistanceM: null, finishDistanceM: null };
     const distanceKey = field === 'start' ? 'startDistanceM' : 'finishDistanceM';
-
     const markerKey = field === 'start' ? 'startMarkerVideoMs' : 'finishMarkerVideoMs';
 
     useProject.setState({
-
       project: {
-
         ...project,
-
-        course: {
-
-          ...prev,
-
-          [distanceKey]: distance,
-
-          [markerKey]: videoTimeMs,
-
-        },
-
+        course: { ...prev, [distanceKey]: distance, [markerKey]: globalTimeMs },
         updatedAt: new Date().toISOString(),
-
       },
-
     });
-
     return true;
-
   },
 
-  clearCourseMarker: (field) =>
-
-    set((s) => {
-
-      const prev = s.project.course;
-
-      if (!prev) return s;
-
-      const distanceKey = field === 'start' ? 'startDistanceM' : 'finishDistanceM';
-
-      const markerKey = field === 'start' ? 'startMarkerVideoMs' : 'finishMarkerVideoMs';
-
-      return {
-
-        project: {
-
-          ...s.project,
-
-          course: {
-
-            ...prev,
-
-            [distanceKey]: null,
-
-            [markerKey]: null,
-
-          },
-
-          updatedAt: new Date().toISOString(),
-
-        },
-
-      };
-
-    }),
-
+  clearCourseMarker: (field) => set((s) => {
+    const prev = s.project.course;
+    if (!prev) return s;
+    const distanceKey = field === 'start' ? 'startDistanceM' : 'finishDistanceM';
+    const markerKey = field === 'start' ? 'startMarkerVideoMs' : 'finishMarkerVideoMs';
+    return {
+      project: {
+        ...s.project,
+        course: { ...prev, [distanceKey]: null, [markerKey]: null },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }),
 }));
-
-

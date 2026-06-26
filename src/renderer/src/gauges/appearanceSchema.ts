@@ -1,6 +1,8 @@
 import type { JSONSchemaProperty } from '@shared/types';
+import { FONT_FAMILY_VALUES } from '../lib/fonts';
 
-export const FONT_PRESETS = ['Inter', 'JetBrains Mono', 'system-ui'] as const;
+/** Selectable gauge fonts — single source of truth lives in lib/fonts.ts. */
+export const FONT_PRESETS = FONT_FAMILY_VALUES;
 
 /** Shared appearance schema fields for built-in gauges. */
 export const appearanceSchemaProperties: Record<string, JSONSchemaProperty> = {
@@ -44,13 +46,23 @@ export const appearanceSchemaProperties: Record<string, JSONSchemaProperty> = {
     default: 'Inter',
     group: 'Appearance',
   },
-  cornerStyle: {
+  frameShape: {
     type: 'string',
     title: 'Frame shape',
-    enum: ['rounded', 'square', 'circle'],
+    enum: ['rectangle', 'ellipse'],
     format: 'select',
-    default: 'rounded',
+    default: 'rectangle',
     group: 'Appearance',
+  },
+  frameCornerRadius: {
+    type: 'number',
+    title: 'Corner radius',
+    minimum: 0,
+    maximum: 240,
+    step: 1,
+    default: 0,
+    group: 'Appearance',
+    description: 'Rounded corners for rectangle frames (layout pixels).',
   },
 };
 
@@ -60,5 +72,6 @@ export const appearanceDefaults = {
   panelBorder: 'transparent',
   fontScale: 1,
   fontFamily: 'Inter' as const,
-  cornerStyle: 'rounded' as const,
+  frameShape: 'rectangle' as const,
+  frameCornerRadius: 0,
 };

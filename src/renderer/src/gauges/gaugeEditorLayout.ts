@@ -1,14 +1,18 @@
 /** Layout types and geometry for the interactive gauge editor (480×270 reference frame). */
+import type { GaugeElement, TextColorChoice, TextIcon, TextSlot, XY } from '@shared/types/gaugeElement';
+import { drawTextIcon, textIconWidth } from './textIcons';
+import { defaultGaugeElements, normalizeGaugeElements } from '../lib/gaugeElementFactory';
+import type { FrameShape } from './frameStyle';
+import { framePreviewCornerRadius, panelCircleGeometry, panelEllipseGeometry } from './frameStyle';
+
+export { panelCircleGeometry, panelEllipseGeometry } from './frameStyle';
+
+export type { XY, TextColorChoice, TextSlot, GaugeElement };
 
 export const LAYOUT_REF_W = 480;
 export const LAYOUT_REF_H = 270;
 export const MIN_RECT_W = 140;
 export const MIN_RECT_H = 90;
-
-export interface XY {
-  x: number;
-  y: number;
-}
 
 export interface LayoutRect {
   x: number;
@@ -18,11 +22,10 @@ export interface LayoutRect {
 }
 
 export type TextRole = 'label' | 'value' | 'unit';
-export type TextColorChoice = string | 'default';
 
+/** @deprecated Legacy text slot shape — used by barGauge legacy layout path only. */
 export interface TextElement {
   visible: boolean;
-  /** Absolute coords in the 480×270 reference frame. */
   pos: XY;
   textOverride: string;
   color: TextColorChoice;
@@ -30,10 +33,8 @@ export interface TextElement {
 }
 
 export interface BarConfig {
-  /** Bar track bounds in the 480×270 reference frame (w = length, h = thickness). */
   rect: LayoutRect;
   rounded: boolean;
-  /** 'default' follows the live gauge fill color (accent or zone color). */
   color: TextColorChoice;
 }
 
@@ -46,42 +47,23 @@ export type GaugeLayoutTemplate = 'telemetry' | 'gps';
 export interface GaugeLayoutConfig {
   /** Internal panel bounding box in the 480×270 reference frame. */
   gaugeRect: LayoutRect;
-  arcCenter: XY;
-  arcRadius: number;
-  arcStartDeg: number;
-  arcEndDeg: number;
-  text: Record<TextRole, TextElement>;
-  bar: BarConfig;
-  /** Route map bounds in the 480×270 reference frame (GPS gauges). */
-  mapRect: LayoutRect;
+  /** Ordered elements — paint order follows array order. */
+  elements: GaugeElement[];
 }
 
 export const TEXT_ROLES: TextRole[] = ['label', 'value', 'unit'];
 
-/** Default panel frame within the 480×270 editor canvas (matches canvas mock v4). */
+/** Default panel frame within the 480×270 editor canvas. */
 export const DEFAULT_GAUGE_RECT: LayoutRect = { x: 100, y: 45, w: 280, h: 180 };
 
-const DEFAULT_ARC_CENTER: XY = {
-  x: DEFAULT_GAUGE_RECT.x + DEFAULT_GAUGE_RECT.w * 0.5,
-  y: DEFAULT_GAUGE_RECT.y + DEFAULT_GAUGE_RECT.h * 0.58,
+export const DEFAULT_GPS_GAUGE_RECT: LayoutRect = { x: 90, y: 35, w: 300, h: 200 };
+
+export const DEFAULT_GAUGE_LAYOUT: GaugeLayoutConfig = {
+  gaugeRect: { ...DEFAULT_GAUGE_RECT },
+  elements: defaultGaugeElements(DEFAULT_GAUGE_RECT, 'speed'),
 };
 
-const DEFAULT_ARC_RADIUS = Math.round(
-  (Math.min(DEFAULT_GAUGE_RECT.w, DEFAULT_GAUGE_RECT.h) / 2) * 0.65,
-);
-
-function defaultTextElement(role: TextRole): TextElement {
-  const r = DEFAULT_GAUGE_RECT;
-  const cx = r.x + r.w * 0.5;
-  const baseline = (yFrac: number) => r.y + r.h * yFrac;
-  if (role === 'label') {
-    return { visible: true, pos: { x: cx, y: baseline(0.2) }, textOverride: '', color: 'default', fontSize: 11 };
-  }
-  if (role === 'value') {
-    return { visible: true, pos: { x: cx, y: baseline(0.52) }, textOverride: '', color: 'default', fontSize: 36 };
-  }
-  return { visible: true, pos: { x: cx, y: baseline(0.78) }, textOverride: '', color: 'default', fontSize: 12 };
-}
+export const MAX_ARC_RADIUS = Math.min(LAYOUT_REF_W, LAYOUT_REF_H) / 2;
 
 export function defaultBarConfig(gaugeRect: LayoutRect = DEFAULT_GAUGE_RECT): BarConfig {
   const pad = Math.min(gaugeRect.h, gaugeRect.w) * 0.1;
@@ -103,10 +85,6 @@ export function resolveBarFillColor(bar: BarConfig, fallbackColor: string): stri
   return bar.color;
 }
 
-export function resolveBarConfig(layout: GaugeLayoutConfig): BarConfig {
-  return layout.bar ?? defaultBarConfig(layout.gaugeRect);
-}
-
 export function defaultMapRect(gaugeRect: LayoutRect): LayoutRect {
   const insetX = gaugeRect.w * 0.08;
   const insetTop = gaugeRect.h * 0.18;
@@ -118,55 +96,6 @@ export function defaultMapRect(gaugeRect: LayoutRect): LayoutRect {
     h: Math.max(MIN_MAP_SIZE, gaugeRect.h - insetTop - insetBottom),
   };
 }
-
-function defaultGpsTextElement(role: TextRole, gaugeRect: LayoutRect): TextElement {
-  const cx = gaugeRect.x + gaugeRect.w * 0.12;
-  const top = gaugeRect.y + gaugeRect.h * 0.12;
-  if (role === 'label') {
-    return { visible: true, pos: { x: cx, y: top }, textOverride: '', color: 'default', fontSize: 11 };
-  }
-  if (role === 'value') {
-    return { visible: false, pos: { x: gaugeRect.x + gaugeRect.w * 0.5, y: gaugeRect.y + gaugeRect.h * 0.5 }, textOverride: '', color: 'default', fontSize: 24 };
-  }
-  return { visible: false, pos: { x: gaugeRect.x + gaugeRect.w * 0.5, y: gaugeRect.y + gaugeRect.h * 0.72 }, textOverride: '', color: 'default', fontSize: 11 };
-}
-
-export const DEFAULT_GPS_GAUGE_RECT: LayoutRect = { x: 90, y: 35, w: 300, h: 200 };
-
-export const DEFAULT_GPS_GAUGE_LAYOUT: GaugeLayoutConfig = (() => {
-  const gaugeRect = { ...DEFAULT_GPS_GAUGE_RECT };
-  return {
-    gaugeRect,
-    arcCenter: { x: gaugeRect.x + gaugeRect.w * 0.5, y: gaugeRect.y + gaugeRect.h * 0.58 },
-    arcRadius: Math.round((Math.min(gaugeRect.w, gaugeRect.h) / 2) * 0.65),
-    arcStartDeg: 30,
-    arcEndDeg: 330,
-    text: {
-      label: defaultGpsTextElement('label', gaugeRect),
-      value: defaultGpsTextElement('value', gaugeRect),
-      unit: defaultGpsTextElement('unit', gaugeRect),
-    },
-    bar: defaultBarConfig(gaugeRect),
-    mapRect: defaultMapRect(gaugeRect),
-  };
-})();
-
-export const DEFAULT_GAUGE_LAYOUT: GaugeLayoutConfig = {
-  gaugeRect: { ...DEFAULT_GAUGE_RECT },
-  arcCenter: { ...DEFAULT_ARC_CENTER },
-  arcRadius: DEFAULT_ARC_RADIUS,
-  arcStartDeg: 30,
-  arcEndDeg: 330,
-  text: {
-    label: defaultTextElement('label'),
-    value: defaultTextElement('value'),
-    unit: defaultTextElement('unit'),
-  },
-  bar: defaultBarConfig(DEFAULT_GAUGE_RECT),
-  mapRect: defaultMapRect(DEFAULT_GAUGE_RECT),
-};
-
-export const MAX_ARC_RADIUS = Math.min(LAYOUT_REF_W, LAYOUT_REF_H) / 2;
 
 /** Dial degree → point. 0° = bottom, clockwise. */
 export function dialPoint(cx: number, cy: number, r: number, deg: number): XY {
@@ -202,16 +131,39 @@ export function arcGeometry(center: XY, radius: number): ArcGeometry {
   return { cx: center.x, cy: center.y, r, maxR: MAX_ARC_RADIUS };
 }
 
-export function panelRadius(shape: 'rounded' | 'square' | 'pill' | 'circle', rect: LayoutRect): number {
-  if (shape === 'square') return 2;
-  if (shape === 'pill' || shape === 'circle') return Math.min(rect.w, rect.h) / 2;
-  return 14;
+export const MIN_ARC_TRACK_WIDTH = 2;
+export const MAX_ARC_TRACK_WIDTH = 48;
+
+export function arcTrackWidth(radius: number): number {
+  const r = clamp(radius, 8, MAX_ARC_RADIUS);
+  return Math.max(6, r * 0.16);
 }
 
-export function panelCircleGeometry(rect: LayoutRect): { cx: number; cy: number; r: number } {
-  const size = Math.min(rect.w, rect.h);
-  const r = size / 2;
-  return { cx: rect.x + rect.w / 2, cy: rect.y + rect.h / 2, r };
+export function resolveArcTrackWidth(radius: number, trackWidth?: number): number {
+  if (trackWidth != null && Number.isFinite(trackWidth)) {
+    return clamp(trackWidth, MIN_ARC_TRACK_WIDTH, MAX_ARC_TRACK_WIDTH);
+  }
+  return arcTrackWidth(radius);
+}
+
+/** Selection bounds — outer edge of the stroked arc track, centered on `center`. */
+export function arcSelectionBounds(center: XY, radius: number, trackWidth?: number): LayoutRect {
+  const r = clamp(radius, 8, MAX_ARC_RADIUS);
+  const outer = r + resolveArcTrackWidth(r, trackWidth) / 2;
+  return {
+    x: center.x - outer,
+    y: center.y - outer,
+    w: outer * 2,
+    h: outer * 2,
+  };
+}
+
+export function panelRadius(
+  frameShape: FrameShape,
+  cornerRadius: number,
+  rect: LayoutRect,
+): number {
+  return framePreviewCornerRadius(frameShape, cornerRadius, rect);
 }
 
 export function clamp(v: number, lo: number, hi: number): number {
@@ -221,6 +173,72 @@ export function clamp(v: number, lo: number, hi: number): number {
 export function snapToGrid(value: number, gridSize: number, enabled: boolean): number {
   if (!enabled || gridSize <= 0) return value;
   return Math.round(value / gridSize) * gridSize;
+}
+
+export function snapPointToGrid(point: XY, gridSize: number, enabled: boolean): XY {
+  return {
+    x: snapToGrid(point.x, gridSize, enabled),
+    y: snapToGrid(point.y, gridSize, enabled),
+  };
+}
+
+export function snapLayoutRect(rect: LayoutRect, gridSize: number, enabled: boolean): LayoutRect {
+  return {
+    x: snapToGrid(rect.x, gridSize, enabled),
+    y: snapToGrid(rect.y, gridSize, enabled),
+    w: snapToGrid(rect.w, gridSize, enabled),
+    h: snapToGrid(rect.h, gridSize, enabled),
+  };
+}
+
+/** Move a rect so its center follows a pointer, snapping the center to grid vertices. */
+export function snapRectMoveByCenter(
+  rect: LayoutRect,
+  pointerOrigin: XY,
+  pointer: XY,
+  gridSize: number,
+  enabled: boolean,
+): LayoutRect {
+  const halfW = rect.w / 2;
+  const halfH = rect.h / 2;
+  const cx = clamp(
+    rect.x + halfW + (pointer.x - pointerOrigin.x),
+    halfW,
+    LAYOUT_REF_W - halfW,
+  );
+  const cy = clamp(
+    rect.y + halfH + (pointer.y - pointerOrigin.y),
+    halfH,
+    LAYOUT_REF_H - halfH,
+  );
+  const snapped = snapPointToGrid({ x: cx, y: cy }, gridSize, enabled);
+  return { ...rect, x: snapped.x - halfW, y: snapped.y - halfH };
+}
+
+/** Delta to move bounds so their center snaps to grid vertices. */
+export function snapBoundsCenterMoveDelta(
+  bounds: LayoutRect,
+  pointerOrigin: XY,
+  pointer: XY,
+  gridSize: number,
+  enabled: boolean,
+): XY {
+  const originCenter = {
+    x: bounds.x + bounds.w / 2,
+    y: bounds.y + bounds.h / 2,
+  };
+  const targetCenter = snapPointToGrid(
+    {
+      x: originCenter.x + (pointer.x - pointerOrigin.x),
+      y: originCenter.y + (pointer.y - pointerOrigin.y),
+    },
+    gridSize,
+    enabled,
+  );
+  return {
+    x: targetCenter.x - originCenter.x,
+    y: targetCenter.y - originCenter.y,
+  };
 }
 
 export function wrap360(v: number): number {
@@ -235,10 +253,9 @@ export function formatScaleMaxLabel(v: number): string {
   return Math.round(v).toString();
 }
 
-/** Map layout coords to video pixels — layout frame fills the placement rect. */
 export function layoutToVideoPixel(
   local: XY,
-  layout: GaugeLayoutConfig,
+  layout: { gaugeRect: LayoutRect },
   videoRect: { x: number; y: number; w: number; h: number },
 ): XY {
   const gr = layout.gaugeRect;
@@ -250,17 +267,16 @@ export function layoutToVideoPixel(
 }
 
 export function videoLayoutScale(
-  layout: GaugeLayoutConfig,
+  layout: { gaugeRect: LayoutRect },
   videoRect: { w: number; h: number },
 ): number {
   const gr = layout.gaugeRect;
   return videoRect.w / gr.w;
 }
 
-/** Map layout-frame coords into video pixels via canvas transform (width-based stretch). */
 export function withLayoutVideoTransform(
   ctx: CanvasRenderingContext2D,
-  layout: GaugeLayoutConfig,
+  layout: { gaugeRect: LayoutRect },
   videoRect: { x: number; y: number; w: number; h: number },
   draw: () => void,
 ): void {
@@ -274,27 +290,29 @@ export function withLayoutVideoTransform(
   ctx.restore();
 }
 
-export interface LayoutTextDrawOptions {
+export interface TextSlotDrawOptions {
   accentColor: string;
   fontFamily?: string;
   fontScale?: number;
   roleText: (role: TextRole) => string;
-  /** Skip roles whose resolved display string is empty (e.g. GPS map gauges). */
   skipEmpty?: boolean;
 }
 
-/** Draw layout text at layout coords — call inside {@link withLayoutVideoTransform}. */
-export function drawLayoutTextInLayoutSpace(
+/** Draw text readout slots at layout coords — call inside {@link withLayoutVideoTransform}. */
+export function drawTextSlotsInLayoutSpace(
   ctx: CanvasRenderingContext2D,
-  layout: GaugeLayoutConfig,
-  options: LayoutTextDrawOptions,
+  slots: { label?: TextSlot; value: TextSlot; unit?: TextSlot },
+  options: TextSlotDrawOptions,
 ): void {
   const family = options.fontFamily ?? 'Inter';
   const fontScale = options.fontScale ?? 1;
-  for (const role of TEXT_ROLES) {
-    const el = layout.text[role];
-    if (!el.visible) continue;
-    const display = el.textOverride.trim().length > 0 ? el.textOverride : options.roleText(role);
+  const roles: TextRole[] = ['label', 'value', 'unit'];
+  for (const role of roles) {
+    const el = role === 'label' ? slots.label : role === 'unit' ? slots.unit : slots.value;
+    if (!el?.visible) continue;
+    const display = role === 'unit'
+      ? options.roleText(role)
+      : (el.textOverride.trim().length > 0 ? el.textOverride : options.roleText(role));
     if (options.skipEmpty && !display) continue;
     const size = el.fontSize * fontScale;
     const fill = resolveTextColor(el.color, role, options.accentColor);
@@ -309,16 +327,48 @@ export function drawLayoutTextInLayoutSpace(
   ctx.textBaseline = 'alphabetic';
 }
 
-/** Layout frame aspect (width / height). */
+export function drawStaticTextInLayoutSpace(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  pos: XY,
+  fontSize: number,
+  color: TextColorChoice,
+  accentColor: string,
+  fontFamily = 'Inter',
+  fontScale = 1,
+): void {
+  const size = fontSize * fontScale;
+  const fill = !color || color === 'default' ? accentColor : color;
+  ctx.fillStyle = fill;
+  ctx.font = `600 ${Math.floor(size)}px ${fontFamily}, system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, pos.x, pos.y);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+}
+
+export function drawImageElementInLayoutSpace(
+  ctx: CanvasRenderingContext2D,
+  pos: XY,
+  size: number,
+  color: TextColorChoice,
+  accentColor: string,
+  icon: TextIcon,
+  fontScale = 1,
+): void {
+  if (icon === 'none') return;
+  const h = Math.max(2, size * fontScale);
+  const w = textIconWidth(icon, h);
+  const fill = !color || color === 'default' ? accentColor : color;
+  drawTextIcon(ctx, icon, pos.x - w / 2, pos.y, h, fill);
+}
+
 export function layoutFrameAspect(layout: GaugeLayoutConfig): number {
   const gr = layout.gaugeRect;
   return gr.w / gr.h;
 }
 
-/**
- * Relative overlay height so the on-video bounding box matches the layout
- * frame aspect for a given video resolution.
- */
 export function relativeHeightForFrameAspect(
   relW: number,
   frameW: number,
@@ -330,7 +380,6 @@ export function relativeHeightForFrameAspect(
   return (relW * videoW) / (frameAspect * videoH);
 }
 
-/** Inverse of {@link relativeHeightForFrameAspect} — derive width from height. */
 export function relativeWidthForFrameAspect(
   relH: number,
   frameW: number,
@@ -342,7 +391,6 @@ export function relativeWidthForFrameAspect(
   return (relH * frameAspect * videoH) / videoW;
 }
 
-/** Default relative rect sized to match DEFAULT_GAUGE_LAYOUT frame on a video. */
 export function defaultVideoRectForLayout(
   layout: GaugeLayoutConfig = DEFAULT_GAUGE_LAYOUT,
   videoW = 1920,
@@ -358,19 +406,15 @@ export function defaultVideoRectForLayout(
 
 const MIN_VIDEO_REL = 0.04;
 
-/** Keep on-video gauge size matched to layout frame aspect for the video resolution. */
 export function syncGaugeVideoRectHeight(
   rect: { x: number; y: number; w: number; h: number },
   layout: GaugeLayoutConfig,
   videoW: number,
   videoH: number,
-  panelShape: 'rounded' | 'square' | 'pill' | 'circle' = 'rounded',
 ): { x: number; y: number; w: number; h: number } {
-  const gr = panelShape === 'circle'
-    ? normalizeSquareGaugeRect(layout.gaugeRect)
-    : layout.gaugeRect;
+  const gr = layout.gaugeRect;
   const frameW = gr.w;
-  const frameH = panelShape === 'circle' ? gr.w : gr.h;
+  const frameH = gr.h;
   const maxH = 1 - rect.y;
   const maxW = 1 - rect.x;
 
@@ -388,7 +432,7 @@ export function syncGaugeVideoRectHeight(
     h = maxH;
     w = relativeWidthForFrameAspect(h, frameW, frameH, videoW, videoH);
     w = clamp(w, MIN_VIDEO_REL, maxW);
-    h = clamp(relativeHeightForFrameAspect(w, frameW, frameH, videoW, videoH), MIN_VIDEO_REL, maxH);
+    h = clamp(h, MIN_VIDEO_REL, maxH);
   } else {
     h = clamp(h, MIN_VIDEO_REL, maxH);
   }
@@ -396,37 +440,166 @@ export function syncGaugeVideoRectHeight(
   return { ...rect, w, h };
 }
 
+const VIDEO_CIRCLE_RESIZE_CORNERS: LayoutCorner[] = ['n', 'e', 's', 'w'];
+const VIDEO_RECT_RESIZE_HANDLES: LayoutCorner[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+
+const VIDEO_CIRCLE_HANDLE_DEG: Record<LayoutCorner, number> = {
+  n: 180,
+  ne: 135,
+  e: 90,
+  se: 45,
+  s: 0,
+  sw: 315,
+  w: 270,
+  nw: 225,
+};
+
+export const VIDEO_HANDLE_HIT_PX = 8;
+
+function layoutCornerRelPosition(
+  rect: { x: number; y: number; w: number; h: number },
+  corner: LayoutCorner,
+): XY {
+  const { x, y, w, h } = rect;
+  if (corner === 'nw') return { x, y };
+  if (corner === 'ne') return { x: x + w, y };
+  if (corner === 'se') return { x: x + w, y: y + h };
+  if (corner === 'sw') return { x, y: y + h };
+  if (corner === 'n') return { x: x + w / 2, y };
+  if (corner === 's') return { x: x + w / 2, y: y + h };
+  if (corner === 'e') return { x: x + w, y: y + h / 2 };
+  return { x, y: y + h / 2 };
+}
+
+export function videoGaugeResizeHandles(
+  _rect: { x: number; y: number; w: number; h: number },
+  _isEllipse: boolean,
+): LayoutCorner[] {
+  return VIDEO_RECT_RESIZE_HANDLES;
+}
+
+export function videoGaugeHandleRelPosition(
+  rect: { x: number; y: number; w: number; h: number },
+  corner: LayoutCorner,
+  _isEllipse: boolean,
+): XY {
+  return layoutCornerRelPosition(rect, corner);
+}
+
+export function hitVideoGaugeResizeHandle(
+  relX: number,
+  relY: number,
+  rect: { x: number; y: number; w: number; h: number },
+  isEllipse: boolean,
+  boxW: number,
+  boxH: number,
+): LayoutCorner | null {
+  const pxX = relX * boxW;
+  const pxY = relY * boxH;
+  for (const corner of videoGaugeResizeHandles(rect, isEllipse)) {
+    const p = videoGaugeHandleRelPosition(rect, corner, isEllipse);
+    const dist = Math.hypot(pxX - p.x * boxW, pxY - p.y * boxH);
+    if (dist <= VIDEO_HANDLE_HIT_PX) return corner;
+  }
+  return null;
+}
+
+export function videoResizeHandleCursor(corner: LayoutCorner): string {
+  if (corner === 'n' || corner === 's') return 'ns-resize';
+  if (corner === 'e' || corner === 'w') return 'ew-resize';
+  if (corner === 'ne' || corner === 'sw') return 'nesw-resize';
+  return 'nwse-resize';
+}
+
+export function resizeVideoGaugeRect(
+  orig: { x: number; y: number; w: number; h: number },
+  corner: LayoutCorner,
+  dxRel: number,
+  dyRel: number,
+  layout: GaugeLayoutConfig,
+  videoW: number,
+  videoH: number,
+): { x: number; y: number; w: number; h: number } {
+  const gr = layout.gaugeRect;
+  const frameW = gr.w;
+  const frameH = gr.h;
+
+  let anchorX = orig.x + orig.w / 2;
+  if (corner.includes('w')) anchorX = orig.x + orig.w;
+  else if (corner.includes('e')) anchorX = orig.x;
+
+  let anchorY = orig.y + orig.h / 2;
+  if (corner.includes('n')) anchorY = orig.y + orig.h;
+  else if (corner.includes('s')) anchorY = orig.y;
+
+  let newW = orig.w;
+  let newH = orig.h;
+
+  if (corner === 'e') newW = orig.w + 2 * dxRel;
+  else if (corner === 'w') newW = orig.w - 2 * dxRel;
+  else if (corner === 'n') {
+    newH = orig.h - 2 * dyRel;
+    newW = relativeWidthForFrameAspect(newH, frameW, frameH, videoW, videoH);
+  } else if (corner === 's') {
+    newH = orig.h + 2 * dyRel;
+    newW = relativeWidthForFrameAspect(newH, frameW, frameH, videoW, videoH);
+  } else if (corner === 'se' || corner === 'ne') newW = orig.w + dxRel;
+  else if (corner === 'nw' || corner === 'sw') newW = orig.w - dxRel;
+
+  if (corner !== 'n' && corner !== 's') {
+    const synced = syncGaugeVideoRectHeight(
+      { x: 0, y: 0, w: newW, h: orig.h },
+      layout,
+      videoW,
+      videoH,
+    );
+    newW = synced.w;
+    newH = synced.h;
+  } else {
+    newH = clamp(newH, MIN_VIDEO_REL, 1);
+    newW = relativeWidthForFrameAspect(newH, frameW, frameH, videoW, videoH);
+    newW = clamp(newW, MIN_VIDEO_REL, 1);
+    newH = relativeHeightForFrameAspect(newW, frameW, frameH, videoW, videoH);
+    newH = clamp(newH, MIN_VIDEO_REL, 1);
+    newW = clamp(newW, MIN_VIDEO_REL, 1);
+  }
+
+  let x: number;
+  let y: number;
+  if (corner.includes('e') && !corner.includes('w')) x = anchorX;
+  else if (corner.includes('w')) x = anchorX - newW;
+  else x = anchorX - newW / 2;
+
+  if (corner.includes('s') && !corner.includes('n')) y = anchorY;
+  else if (corner.includes('n')) y = anchorY - newH;
+  else y = anchorY - newH / 2;
+
+  x = clamp(x, 0, 1 - newW);
+  y = clamp(y, 0, 1 - newH);
+
+  return syncGaugeVideoRectHeight({ x, y, w: newW, h: newH }, layout, videoW, videoH);
+}
+
 export function mergeGaugeLayout(
   partial?: Partial<GaugeLayoutConfig> | null,
   template: GaugeLayoutTemplate = 'telemetry',
 ): GaugeLayoutConfig {
-  const base = template === 'gps' ? DEFAULT_GPS_GAUGE_LAYOUT : DEFAULT_GAUGE_LAYOUT;
+  const base = template === 'gps'
+    ? {
+        gaugeRect: { ...DEFAULT_GPS_GAUGE_RECT },
+        elements: defaultGaugeElements(DEFAULT_GPS_GAUGE_RECT, 'speed'),
+      }
+    : DEFAULT_GAUGE_LAYOUT;
   if (!partial) return structuredClone(base);
   const gaugeRect = { ...base.gaugeRect, ...partial.gaugeRect };
-  const defaultBar = defaultBarConfig(gaugeRect);
-  const defaultMap = defaultMapRect(gaugeRect);
-  return {
-    gaugeRect,
-    arcCenter: { ...base.arcCenter, ...partial.arcCenter },
-    arcRadius: partial.arcRadius ?? base.arcRadius,
-    arcStartDeg: partial.arcStartDeg ?? base.arcStartDeg,
-    arcEndDeg: partial.arcEndDeg ?? base.arcEndDeg,
-    text: {
-      label: { ...base.text.label, ...partial.text?.label },
-      value: { ...base.text.value, ...partial.text?.value },
-      unit: { ...base.text.unit, ...partial.text?.unit },
-    },
-    bar: {
-      rect: { ...defaultBar.rect, ...partial.bar?.rect },
-      rounded: partial.bar?.rounded ?? defaultBar.rounded,
-      color: partial.bar?.color ?? defaultBar.color,
-    },
-    mapRect: { ...defaultMap, ...partial.mapRect },
-  };
+  const elements = Array.isArray(partial.elements) && partial.elements.length > 0
+    ? structuredClone(partial.elements)
+    : structuredClone(base.elements);
+  return { gaugeRect, elements: normalizeGaugeElements(elements, gaugeRect) };
 }
 
 export function defaultLayoutForTemplate(template: GaugeLayoutTemplate): GaugeLayoutConfig {
-  return structuredClone(template === 'gps' ? DEFAULT_GPS_GAUGE_LAYOUT : DEFAULT_GAUGE_LAYOUT);
+  return mergeGaugeLayout(null, template);
 }
 
 export type LayoutCorner = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
@@ -450,35 +623,67 @@ export function resizeLayoutRect(
     : { minW: minWOrOptions, minH, constrainToLayout: true };
   const minW = options.minW ?? MIN_RECT_W;
   const minHResolved = options.minH ?? MIN_RECT_H;
+  const cx = orig.x + orig.w / 2;
+  const cy = orig.y + orig.h / 2;
   let { x, y, w, h } = orig;
-  if (corner.includes('e')) w = orig.w + dx;
-  if (corner.includes('s')) h = orig.h + dy;
-  if (corner.includes('w')) {
-    x = orig.x + dx;
-    w = orig.w - dx;
+
+  if (corner === 'n') {
+    h = orig.h - 2 * dy;
+    y = cy - h / 2;
+  } else if (corner === 's') {
+    h = orig.h + 2 * dy;
+    y = cy - h / 2;
+  } else if (corner === 'e') {
+    w = orig.w + 2 * dx;
+    x = cx - w / 2;
+  } else if (corner === 'w') {
+    w = orig.w - 2 * dx;
+    x = cx - w / 2;
+  } else {
+    if (corner.includes('e')) w = orig.w + dx;
+    if (corner.includes('s')) h = orig.h + dy;
+    if (corner.includes('w')) {
+      x = orig.x + dx;
+      w = orig.w - dx;
+    }
+    if (corner.includes('n')) {
+      y = orig.y + dy;
+      h = orig.h - dy;
+    }
   }
-  if (corner.includes('n')) {
-    y = orig.y + dy;
-    h = orig.h - dy;
-  }
+
   if (w < minW) {
-    if (corner.includes('w')) x = orig.x + (orig.w - minW);
     w = minW;
+    if (corner === 'e' || corner === 'w') {
+      x = cx - w / 2;
+    } else if (corner.includes('w')) {
+      x = orig.x + (orig.w - minW);
+    }
   }
   if (h < minHResolved) {
-    if (corner.includes('n')) y = orig.y + (orig.h - minHResolved);
     h = minHResolved;
+    if (corner === 'n' || corner === 's') {
+      y = cy - h / 2;
+    } else if (corner.includes('n')) {
+      y = orig.y + (orig.h - minHResolved);
+    }
   }
   if (options.constrainToLayout !== false) {
-    x = clamp(x, 0, LAYOUT_REF_W - minW);
-    y = clamp(y, 0, LAYOUT_REF_H - minHResolved);
-    w = clamp(w, minW, LAYOUT_REF_W - x);
-    h = clamp(h, minHResolved, LAYOUT_REF_H - y);
+    if (corner === 'n' || corner === 's' || corner === 'e' || corner === 'w') {
+      w = clamp(w, minW, LAYOUT_REF_W);
+      h = clamp(h, minHResolved, LAYOUT_REF_H);
+      x = clamp(cx - w / 2, 0, LAYOUT_REF_W - w);
+      y = clamp(cy - h / 2, 0, LAYOUT_REF_H - h);
+    } else {
+      x = clamp(x, 0, LAYOUT_REF_W - minW);
+      y = clamp(y, 0, LAYOUT_REF_H - minHResolved);
+      w = clamp(w, minW, LAYOUT_REF_W - x);
+      h = clamp(h, minHResolved, LAYOUT_REF_H - y);
+    }
   }
   return { x, y, w, h };
 }
 
-/** Force a layout frame to a centered square (circle bounding box uses side length as diameter). */
 export function normalizeSquareGaugeRect(rect: LayoutRect, minSize = MIN_RECT_W): LayoutRect {
   const maxSize = Math.min(LAYOUT_REF_W, LAYOUT_REF_H);
   const size = clamp(Math.max(rect.w, rect.h), minSize, maxSize);
@@ -489,7 +694,6 @@ export function normalizeSquareGaugeRect(rect: LayoutRect, minSize = MIN_RECT_W)
   return { x, y, w: size, h: size };
 }
 
-/** Uniform square resize for circular gauge frames. */
 export function resizeSquareLayoutRect(
   orig: LayoutRect,
   corner: LayoutCorner,
@@ -509,10 +713,10 @@ export function resizeSquareLayoutRect(
   else if (corner === 'nw') size = Math.max(orig.w - dx, orig.h - dy);
   else if (corner === 'ne') size = Math.max(orig.w + dx, orig.h - dy);
   else if (corner === 'sw') size = Math.max(orig.w - dx, orig.h + dy);
-  else if (corner === 'e') size = orig.w + dx;
-  else if (corner === 'w') size = orig.w - dx;
-  else if (corner === 's') size = orig.h + dy;
-  else if (corner === 'n') size = orig.h - dy;
+  else if (corner === 'e') size = orig.w + 2 * dx;
+  else if (corner === 'w') size = orig.w - 2 * dx;
+  else if (corner === 's') size = orig.h + 2 * dy;
+  else if (corner === 'n') size = orig.h - 2 * dy;
 
   if (options.constrainToLayout !== false) {
     size = clamp(size, minSize, Math.min(LAYOUT_REF_W, LAYOUT_REF_H));

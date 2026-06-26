@@ -1,10 +1,17 @@
 import type { GaugePlugin, TelemetryField } from '@shared/types';
-import type { BarGaugeDisplayStyle, DataGaugeDisplayStyle } from './barGaugeSchema';
+import type { GaugeElement } from '@shared/types/gaugeElement';
+import { isDataElement } from '@shared/types/gaugeElement';
+import type { BarGaugeDisplayStyle } from './barGaugeSchema';
 import { barGaugeSchemaProperties } from './barGaugeSchema';
 import type { FillGradientConfig } from './gaugeGradient';
-import { colorAtGradient, resolveFillGradient } from './gaugeGradient';
+import {
+  colorAtGradient,
+  resolveElementFillGradient,
+} from './gaugeGradient';
 import { DATA_GAUGE_PLUGIN_ID, fieldMeta, fieldLabel } from './fieldRegistry';
-import { isDataGaugePlugin, resolveDataGaugeDisplayStyle } from './dataGauge';
+import { isDataGaugePlugin } from './dataGauge';
+import type { GaugeLayoutConfig } from './gaugeEditorLayout';
+import { isCompositeGaugeConfig } from '../lib/gaugeElementFactory';
 import { hrZoneColor } from './heartRate';
 import { powerZoneColor } from './power';
 
@@ -19,6 +26,7 @@ export interface GaugeEditorMeta {
   patchScaleMax: (config: Record<string, unknown>, value: number) => Record<string, unknown>;
   scaleMaxRange: { min: number; max: number; step: number };
   formatPreviewValue: (scaleMax: number, ratio: number, config?: Record<string, unknown>) => string;
+  formatPreviewUnit?: (scaleMax: number, ratio: number, config?: Record<string, unknown>) => string;
 }
 
 const LEGACY_PLUGIN_FIELDS: Record<string, TelemetryField> = {
@@ -50,25 +58,55 @@ function metaFromField(field: TelemetryField): GaugeEditorMeta {
     patchScaleMax: fm.patchScaleMax,
     scaleMaxRange: fm.getScaleMaxRange({}),
     formatPreviewValue: (scaleMax, ratio, config) => {
-      const raw = scaleMax * ratio;
-      return fm.formatValue(raw, config ?? {});
+      const displayVal = scaleMax * ratio;
+      const cfg = config ?? {};
+      const raw = fm.displayToRaw ? fm.displayToRaw(displayVal, cfg) : displayVal;
+      return fm.formatValue(raw, cfg);
     },
+    formatPreviewUnit: fm.formatUnit
+      ? (scaleMax, ratio, config) => {
+          const displayVal = scaleMax * ratio;
+          const cfg = config ?? {};
+          const raw = fm.displayToRaw ? fm.displayToRaw(displayVal, cfg) : displayVal;
+          return fm.formatUnit!(raw, cfg);
+        }
+      : undefined,
   };
 }
 
-export function resolveGaugeField(plugin: GaugePlugin, config: Record<string, unknown>): TelemetryField | null {
+export function firstDataElement(config: Record<string, unknown>): GaugeElement | null {
+  if (!isCompositeGaugeConfig(config)) return null;
+  const layout = config.layout as GaugeLayoutConfig;
+  return layout.elements.find((e) => isDataElement(e) && e.visible) ?? layout.elements.find(isDataElement) ?? null;
+}
+
+export function elementEditorMeta(element: GaugeElement | null): GaugeEditorMeta | null {
+  if (!element || !isDataElement(element) || element.kind === 'map') {
+    return element?.kind === 'map' ? LEGACY_PLUGIN_META['builtin:gpsMiniMap'] ?? null : null;
+  }
+  const fm = fieldMeta(element.field);
+  return fm ? metaFromField(element.field) : null;
+}
+
+export function resolveGaugeField(
+  plugin: GaugePlugin,
+  config: Record<string, unknown>,
+  element?: GaugeElement | null,
+): TelemetryField | null {
   if (isDataGaugePlugin(plugin.id)) {
-    const displayStyle = resolveDataGaugeDisplayStyle(config);
-    if (displayStyle === 'map') return null;
-    return (config.field as TelemetryField | undefined) ?? 'speed';
+    const el = element ?? firstDataElement(config);
+    if (!el || !isDataElement(el) || el.kind === 'map') return null;
+    return el.field;
   }
   return LEGACY_PLUGIN_FIELDS[plugin.id] ?? null;
 }
 
 export function gaugeEditorKind(plugin: GaugePlugin, config?: Record<string, unknown>): GaugeEditorKind | null {
   if (isDataGaugePlugin(plugin.id)) {
-    const displayStyle = resolveDataGaugeDisplayStyle(config ?? plugin.defaultConfig);
-    return displayStyle === 'map' ? 'gps' : 'telemetry';
+    if (!isCompositeGaugeConfig(config ?? {})) return null;
+    const layout = (config ?? {}).layout as GaugeLayoutConfig;
+    const hasMap = layout.elements.some((e) => e.kind === 'map' && e.visible);
+    return hasMap ? 'gps' : 'telemetry';
   }
   if (plugin.id === 'builtin:gpsMiniMap') return 'gps';
   if (plugin.id in LEGACY_PLUGIN_FIELDS) return 'telemetry';
@@ -79,17 +117,24 @@ export function gaugeEditorKind(plugin: GaugePlugin, config?: Record<string, unk
 }
 
 export function supportsGaugeEditor(plugin: GaugePlugin, config?: Record<string, unknown>): boolean {
+  if (isDataGaugePlugin(plugin.id)) {
+    return isCompositeGaugeConfig(config ?? plugin.defaultConfig);
+  }
   return gaugeEditorKind(plugin, config) != null;
 }
 
-export function gaugeEditorMeta(plugin: GaugePlugin, config?: Record<string, unknown>): GaugeEditorMeta | null {
+export function gaugeEditorMeta(
+  plugin: GaugePlugin,
+  config?: Record<string, unknown>,
+  element?: GaugeElement | null,
+): GaugeEditorMeta | null {
   if (isDataGaugePlugin(plugin.id)) {
     const merged = { ...plugin.defaultConfig, ...config };
-    const displayStyle = resolveDataGaugeDisplayStyle(merged);
-    if (displayStyle === 'map') return LEGACY_PLUGIN_META['builtin:gpsMiniMap'] ?? null;
-    const field = (merged.field as TelemetryField | undefined) ?? 'speed';
-    const fm = fieldMeta(field);
-    return fm ? metaFromField(field) : null;
+    if (element != null) {
+      const fromSelected = elementEditorMeta(element);
+      if (fromSelected) return fromSelected;
+    }
+    return elementEditorMeta(firstDataElement(merged));
   }
   const field = LEGACY_PLUGIN_FIELDS[plugin.id];
   if (field) return metaFromField(field);
@@ -102,50 +147,54 @@ export function resolveDisplayStyle(config: Record<string, unknown>): BarGaugeDi
   return 'bar';
 }
 
-export function resolveDataDisplayStyle(config: Record<string, unknown>): DataGaugeDisplayStyle {
-  return resolveDataGaugeDisplayStyle(config);
-}
-
-export function resolveAccentColor(config: Record<string, unknown>, plugin: GaugePlugin): string {
+export function resolveAccentColor(
+  config: Record<string, unknown>,
+  plugin: GaugePlugin,
+  element?: GaugeElement | null,
+): string {
   if (isDataGaugePlugin(plugin.id)) {
-    const displayStyle = resolveDataGaugeDisplayStyle(config);
-    if (displayStyle === 'map') {
+    const el = element ?? firstDataElement(config);
+    if (el?.kind === 'map') {
+      const fromEl = el.trailColor;
+      if (typeof fromEl === 'string' && fromEl.length > 0) return fromEl;
       const fromConfig = config.trailColor;
       if (typeof fromConfig === 'string' && fromConfig.length > 0) return fromConfig;
       return '#3ddc97';
+    }
+    if (el && (el.kind === 'bar' || el.kind === 'arc' || el.kind === 'text')) {
+      const field = el.field;
+      const fromConfig = config.color;
+      if (typeof fromConfig === 'string' && fromConfig.length > 0) return fromConfig;
+      return fieldMeta(field)?.defaultColor ?? '#3ddc97';
     }
   }
   if (plugin.id === 'builtin:gpsMiniMap') {
     const fromConfig = config.trailColor;
     if (typeof fromConfig === 'string' && fromConfig.length > 0) return fromConfig;
-    const fromDefault = (plugin.defaultConfig as { trailColor?: string }).trailColor;
-    if (typeof fromDefault === 'string' && fromDefault.length > 0) return fromDefault;
     return '#3ddc97';
   }
   const fromConfig = config.color;
   if (typeof fromConfig === 'string' && fromConfig.length > 0) return fromConfig;
-  const field = resolveGaugeField(plugin, config);
+  const field = resolveGaugeField(plugin, config, element);
   if (field) return fieldMeta(field)?.defaultColor ?? '#3ddc97';
-  const fromDefault = (plugin.defaultConfig as { color?: string }).color;
-  if (typeof fromDefault === 'string' && fromDefault.length > 0) return fromDefault;
   return '#3ddc97';
 }
 
-/** Fill color used by bar/arc on the video canvas for sidebar preview sync. */
 export function previewGaugeFillColor(
   plugin: GaugePlugin,
   config: Record<string, unknown>,
   previewRatio: number,
+  element?: GaugeElement | null,
 ): string {
-  const accent = resolveAccentColor(config, plugin);
+  const accent = resolveAccentColor(config, plugin, element);
   const ratio = Math.max(0, Math.min(1, previewRatio));
-  const gradient = resolveFillGradient({ fillGradient: config.fillGradient as FillGradientConfig | undefined });
+  const gradient = resolveElementFillGradient(element, config);
 
   if (gradient.enabled) {
     return colorAtGradient(gradient.stops, ratio);
   }
 
-  const field = resolveGaugeField(plugin, config);
+  const field = resolveGaugeField(plugin, config, element);
   if (field === 'power') {
     const ftp = Number(config.ftp ?? 250);
     const watts = ratio * Math.round(ftp * 1.5);
@@ -159,6 +208,25 @@ export function previewGaugeFillColor(
   return accent;
 }
 
+/** Merge per-element field overrides (units, scale max, etc.) onto gauge config for formatting. */
+export function mergeElementFieldConfig(
+  gaugeConfig: Record<string, unknown>,
+  element: GaugeElement,
+): Record<string, unknown> {
+  if (element.kind !== 'arc' && element.kind !== 'bar' && element.kind !== 'text') {
+    return gaugeConfig;
+  }
+  const overrides: Record<string, unknown> = { field: element.field };
+  if (element.scaleMax != null) overrides.scaleMax = element.scaleMax;
+  if (element.units != null) overrides.units = element.units;
+  if (element.distanceUnits != null) overrides.distanceUnits = element.distanceUnits;
+  if (element.ftp != null) overrides.ftp = element.ftp;
+  if (element.maxHr != null) overrides.maxHr = element.maxHr;
+  if (element.maxCadence != null) overrides.maxCadence = element.maxCadence;
+  if (element.maxSpeedKmh != null) overrides.maxSpeedKmh = element.maxSpeedKmh;
+  return { ...gaugeConfig, ...overrides };
+}
+
 export function derivedTextForRole(
   role: 'label' | 'value' | 'unit',
   meta: GaugeEditorMeta,
@@ -167,20 +235,27 @@ export function derivedTextForRole(
   config?: Record<string, unknown>,
 ): string {
   if (role === 'label') return meta.label.toUpperCase();
-  if (role === 'unit') return meta.getUnit?.(config ?? {}) ?? meta.unit;
+  if (role === 'unit') {
+    return meta.formatPreviewUnit?.(scaleMax, ratio, config)
+      ?? meta.getUnit?.(config ?? {})
+      ?? meta.unit;
+  }
   return meta.formatPreviewValue(scaleMax, ratio, config);
 }
 
-/** Data-only schema keys shown outside the visual editor. */
 export function dataSchemaKeys(plugin: GaugePlugin): string[] {
   const layoutKeys = new Set([
     ...Object.keys(barGaugeSchemaProperties),
-    'panelOpacity', 'panelBg', 'panelBorder', 'fontScale', 'fontFamily', 'cornerStyle',
+    'panelOpacity', 'panelBg', 'panelBorder', 'fontScale', 'fontFamily', 'frameShape', 'frameCornerRadius', 'cornerStyle',
     'layout', 'color', 'fillGradient', 'showArcTicks', 'arcTickCount',
-    'maxSpeedKmh', 'maxHr', 'maxCadence', 'ftp', 'scaleMax', 'field',
+    'displayStyle', 'field',
     ...(plugin.id === 'builtin:speedometer' || isDataGaugePlugin(plugin.id) ? ['units'] : []),
     ...(plugin.id === 'builtin:gpsMiniMap' || isDataGaugePlugin(plugin.id)
-      ? ['trailColor', 'cursorColor', 'routeScope'] : []),
+      ? ['trailColor', 'cursorColor', 'routeScope',
+        'showCourseMarkers', 'showCourseStart', 'showCourseFinish',
+        'startMarkerStyle', 'finishMarkerStyle', 'startMarkerColor', 'finishMarkerColor',
+        'markerScale', 'markerLength', 'markerWidth']
+      : []),
   ]);
   return Object.keys(plugin.schema.properties).filter((k) => !layoutKeys.has(k));
 }
@@ -190,18 +265,10 @@ export const SPEED_UNIT_OPTIONS = [
   { value: 'mph', label: 'mph' },
 ] as const;
 
-export const FONT_OPTIONS = [
-  { value: 'Inter', label: 'Inter' },
-  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
-  { value: 'Roboto Condensed', label: 'Roboto Condensed' },
-  { value: 'Source Sans 3', label: 'Source Sans 3' },
-];
-
-export const DISPLAY_STYLE_OPTIONS = [
-  { value: 'bar', label: 'Bar' },
-  { value: 'arc', label: 'Arc' },
-  { value: 'text', label: 'Text' },
-  { value: 'map', label: 'Map' },
+export const DISTANCE_UNIT_OPTIONS = [
+  { value: 'km', label: 'km / m' },
+  { value: 'mi', label: 'mi / ft' },
 ] as const;
 
+export { FONT_OPTIONS } from '../lib/fonts';
 export { fieldLabel };

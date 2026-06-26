@@ -1,5 +1,13 @@
-import type { MediaSource, SyncAnchor, TrackSyncSettings } from './types';
+import type { MediaSource, SyncAnchor, TimelineClip, TrackSyncSettings, VideoOverlayClip } from './types';
 import type { TelemetryTrack } from './types';
+import {
+  clipAtGlobalTime,
+  clipDurationMs,
+  clipSourceTimeMs,
+  overlayInMs,
+  overlayOutMs,
+  overlayVisibleAt,
+} from './timeline';
 
 /**
  * First non-FIT track with GPS or 3-axis IMU — used for wall-clock fallback
@@ -86,6 +94,142 @@ export function defaultFitTrackSync(
   };
 }
 
+/**
+ * Continue the shared FIT timeline from the previous clip when UTC metadata is
+ * missing. At clip N local t=0, sample FIT at the same ride time as clip N−1 end.
+ */
+export function chainedFitOffsetMs(
+  prevClip: TimelineClip,
+  fitTrackId: string,
+): number {
+  const prevOffset = trackOffsetMs(prevClip.sharedTrackSync, fitTrackId);
+  return prevOffset - clipDurationMs(prevClip);
+}
+
+/**
+ * Default FIT sync for a clip in a multi-clip timeline.
+ * Clip 1 uses UTC wall-clock; later clips chain from the prior clip so one shared
+ * FIT file continues across consecutive videos from the same ride.
+ */
+export function defaultFitTrackSyncForClip(
+  clips: TimelineClip[],
+  clipIndex: number,
+  fitTrack: TelemetryTrack,
+  cameraTrack?: TelemetryTrack,
+): TrackSyncSettings {
+  const clip = clips[clipIndex];
+  if (!clip) return defaultFitTrackSync(null, fitTrack, cameraTrack);
+
+  const camera = cameraTrack ?? pickCameraTrack(clip.localTracks);
+  const anchor: SyncAnchor = 'utc';
+
+  if (clipIndex > 0) {
+    const prev = clips[clipIndex - 1];
+    if (prev?.sharedTrackSync[fitTrack.id]) {
+      return {
+        anchor,
+        playSpeedPercent: 100,
+        offsetMs: chainedFitOffsetMs(prev, fitTrack.id),
+      };
+    }
+  }
+
+  if (videoUtcMs(clip.media, camera) != null) {
+    return {
+      anchor,
+      playSpeedPercent: 100,
+      offsetMs: computeOffsetFromAnchor(anchor, clip.media, fitTrack, camera),
+    };
+  }
+
+  return defaultFitTrackSync(clip.media, fitTrack, camera);
+}
+
+/**
+ * Re-chain clip 2+ shared FIT sync from the prior clip so one FIT file spans all
+ * clips. Skips manual anchors.
+ */
+export function repairSharedFitSync(
+  clips: TimelineClip[],
+  sharedTracks: TelemetryTrack[],
+): TimelineClip[] {
+  const fitTracks = sharedTracks.filter((t) => t.source === 'fit');
+  if (fitTracks.length === 0 || clips.length < 2) return clips;
+
+  const next = [...clips];
+  let anyChanged = false;
+
+  for (let clipIndex = 1; clipIndex < next.length; clipIndex++) {
+    const clip = next[clipIndex]!;
+    const prev = next[clipIndex - 1]!;
+    const sharedTrackSync = { ...clip.sharedTrackSync };
+    let clipChanged = false;
+
+    for (const t of fitTracks) {
+      const sync = sharedTrackSync[t.id];
+      if (!sync || sync.anchor === 'manual') continue;
+      if (!prev.sharedTrackSync[t.id]) continue;
+      const chained = chainedFitOffsetMs(prev, t.id);
+      if (sync.offsetMs === chained) continue;
+      sharedTrackSync[t.id] = { ...sync, offsetMs: chained, anchor: 'utc' };
+      clipChanged = true;
+    }
+
+    if (clipChanged) {
+      next[clipIndex] = { ...clip, sharedTrackSync };
+      anyChanged = true;
+    }
+  }
+
+  return anyChanged ? next : clips;
+}
+
+/** Recompute chained offsets for clips after `fromClipIndex` (inclusive). */
+export function rechainedSharedFitSyncFrom(
+  clips: TimelineClip[],
+  fitTrackId: string,
+  fromClipIndex: number,
+): TimelineClip[] {
+  if (fromClipIndex >= clips.length - 1) return clips;
+
+  const next = [...clips];
+  for (let i = Math.max(1, fromClipIndex + 1); i < next.length; i++) {
+    const clip = next[i]!;
+    const prev = next[i - 1]!;
+    const sync = clip.sharedTrackSync[fitTrackId];
+    if (!sync || sync.anchor === 'manual') continue;
+    const chained = chainedFitOffsetMs(prev, fitTrackId);
+    if (sync.offsetMs === chained) continue;
+    next[i] = {
+      ...clip,
+      sharedTrackSync: {
+        ...clip.sharedTrackSync,
+        [fitTrackId]: { ...sync, offsetMs: chained },
+      },
+    };
+  }
+  return next;
+}
+
+/**
+ * Shared FIT offset used for sampling — clip 2+ chains from the prior clip unless
+ * the anchor is manual. Keeps one FIT file continuous across consecutive clips.
+ */
+export function effectiveSharedFitOffsetMs(
+  clips: TimelineClip[],
+  clipIndex: number,
+  fitTrackId: string,
+): number {
+  const clip = clips[clipIndex];
+  if (!clip) return 0;
+  const sync = clip.sharedTrackSync[fitTrackId];
+  if (!sync) return 0;
+  if (sync.anchor === 'manual' || clipIndex === 0) return sync.offsetMs;
+  const prev = clips[clipIndex - 1];
+  if (!prev?.sharedTrackSync[fitTrackId]) return sync.offsetMs;
+  return chainedFitOffsetMs(prev, fitTrackId);
+}
+
 /** Default sync for a camera telemetry track (fixed at video t=0). */
 export function defaultCameraTrackSync(): TrackSyncSettings {
   return { anchor: 'videoStart', offsetMs: 0, playSpeedPercent: 100 };
@@ -133,11 +277,22 @@ export function fitSampleTimeMs(videoTimeMs: number, offsetMs: number): number {
   return videoTimeMs - offsetMs;
 }
 
+/**
+ * Offset that pins a known data ride time to a known video time.
+ * Inverse of {@link fitSampleTimeMs}: choosing offset = videoMs − dataMs makes
+ * `fitSampleTimeMs(videoMs, offset) === dataMs`. Used by "set sync point at
+ * frame" in the visual sync workspace.
+ */
+export function offsetFromSyncPoint(videoMs: number, dataMs: number): number {
+  return Math.round(videoMs - dataMs);
+}
+
 /** Slider bounds wide enough for wall-clock skew plus full track spans. */
 export function fitOffsetSliderRange(
   tracks: TelemetryTrack[],
   videoDurationMs: number,
   trackSync: Record<string, TrackSyncSettings>,
+  clipMedia?: MediaSource | null,
 ): { min: number; max: number } {
   const camera = pickCameraTrack(tracks);
   let span = Math.max(videoDurationMs, 60_000);
@@ -148,7 +303,7 @@ export function fitOffsetSliderRange(
     span = Math.max(span, fitDur);
     span = Math.max(span, Math.abs(trackOffsetMs(trackSync, t.id)));
     if (camera) {
-      const utcOffset = computeOffsetFromAnchor('utc', null, t, camera);
+      const utcOffset = computeOffsetFromAnchor('utc', clipMedia ?? null, t, camera);
       span = Math.max(span, Math.abs(utcOffset));
     }
   }
@@ -157,9 +312,95 @@ export function fitOffsetSliderRange(
   return { min: -limit, max: limit };
 }
 
+/** Recompute shared FIT sync for one clip when media or tracks change. */
+export function refreshClipSharedTrackSync(
+  sharedTrackSync: Record<string, TrackSyncSettings>,
+  sharedTracks: TelemetryTrack[],
+  clipMedia: MediaSource,
+  localTracks: TelemetryTrack[],
+  clipIndex?: number,
+  clips?: TimelineClip[],
+): Record<string, TrackSyncSettings> {
+  const camera = pickCameraTrack(localTracks);
+  const next = { ...sharedTrackSync };
+  for (const t of sharedTracks) {
+    if (t.source !== 'fit') continue;
+    const sync = next[t.id];
+    if (!sync || sync.anchor === 'manual') continue;
+    if (
+      clipIndex != null
+      && clipIndex > 0
+      && clips?.[clipIndex - 1]?.sharedTrackSync[t.id]
+    ) {
+      next[t.id] = {
+        ...sync,
+        offsetMs: chainedFitOffsetMs(clips[clipIndex - 1]!, t.id),
+      };
+      continue;
+    }
+    const utcOffset = computeOffsetFromAnchor(sync.anchor, clipMedia, t, camera);
+    next[t.id] = { ...sync, offsetMs: utcOffset };
+  }
+  return next;
+}
+
 export const SYNC_ANCHOR_LABELS: Record<SyncAnchor, string> = {
   utc: 'UTC (container clock)',
   videoStart: 'Video start',
   videoEnd: 'Video end',
   manual: 'Manual',
 };
+
+/** UTC epoch ms for the active base clip at global time G. */
+export function baseUtcMsAtGlobal(clips: TimelineClip[], globalMs: number): number | null {
+  const loc = clipAtGlobalTime(clips, globalMs);
+  if (!loc) return null;
+  const utc0 = videoUtcMs(loc.clip.media);
+  if (utc0 == null) return null;
+  return utc0 + clipSourceTimeMs(loc.clip, loc.localMs);
+}
+
+/**
+ * Overlay source media ms at global G, or null when hidden or outside trimmed source.
+ */
+export function overlaySourceMsAt(
+  globalMs: number,
+  overlay: VideoOverlayClip,
+  clips: TimelineClip[],
+): number | null {
+  if (!overlayVisibleAt(globalMs, overlay)) return null;
+
+  const offsetMs = overlay.offsetMs ?? 0;
+  let sourceMs: number;
+
+  if (overlay.alignMode === 'manual') {
+    sourceMs = overlayInMs(overlay) + (globalMs - overlay.startGlobalMs) + offsetMs;
+  } else {
+    const baseUtc = baseUtcMsAtGlobal(clips, globalMs);
+    const overlayUtc = videoUtcMs(overlay.media);
+    if (baseUtc == null || overlayUtc == null) return null;
+    sourceMs = baseUtc - overlayUtc + offsetMs;
+  }
+
+  const inMs = overlayInMs(overlay);
+  const outMs = overlayOutMs(overlay);
+  if (sourceMs < inMs || sourceMs >= outMs) return null;
+  return sourceMs;
+}
+
+/**
+ * Offset (ms) that aligns overlay UTC to base UTC at global G — seeds timestamp mode on add.
+ * At G, overlay source should read `desiredSourceMs` (typically overlayInMs).
+ */
+export function computeTimestampOverlayOffset(
+  clips: TimelineClip[],
+  overlay: VideoOverlayClip,
+  globalMs: number,
+  desiredSourceMs?: number,
+): number | null {
+  const inMs = desiredSourceMs ?? overlayInMs(overlay);
+  const baseUtc = baseUtcMsAtGlobal(clips, globalMs);
+  const overlayUtc = videoUtcMs(overlay.media);
+  if (baseUtc == null || overlayUtc == null) return null;
+  return Math.round(inMs - (baseUtc - overlayUtc));
+}

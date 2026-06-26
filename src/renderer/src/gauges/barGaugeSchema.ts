@@ -1,5 +1,5 @@
 import type { JSONSchemaProperty } from '@shared/types';
-import type { GaugeLayoutConfig } from './gaugeEditorLayout';
+import type { LegacyGaugeLayoutConfig } from './barGaugeLegacyLayout';
 import type { FillGradientConfig } from './gaugeGradient';
 
 export type BarGaugeDisplayStyle = 'bar' | 'arc' | 'text';
@@ -92,5 +92,5 @@ export interface BarGaugeLayoutConfig {
   /** Gradual multi-stop fill gradient (min → max along bar/arc). */
   fillGradient?: FillGradientConfig;
   /** Custom absolute layout from the gauge editor (480×270 reference frame). */
-  layout?: GaugeLayoutConfig;
+  layout?: LegacyGaugeLayoutConfig;
 }
