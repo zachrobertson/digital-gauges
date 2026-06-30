@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import type { TimelineClip, TrackSyncSettings } from '../src/shared/types';
 import { clipAtGlobalTime, clipDurationMs, clipInMs } from '../src/shared/timeline';
-import { effectiveSharedFitOffsetMs, offsetFromSyncPoint } from '../src/shared/sync';
+import { effectiveSharedFitOffsetMs, offsetFromSyncPoint, applySharedFitAnchorToAllClips } from '../src/shared/sync';
 
 const FIT_ID = 'fit-1';
 const MEDIA = { path: '/ride.mp4', durationMs: 60_000 };
@@ -151,9 +151,9 @@ function headTrim(clip: TimelineClip, newInMs: number): TimelineClip {
     'SyncViewer waveform must show the same FIT ride time as the gauge',
   );
 
-  // 2. SyncControlsPanel "fit clip" readout must match the gauge.
-  const fitClipLocalMs = clipLocalPlayhead + clipIn - fitOffset; // fixed formula
-  assert.equal(fitClipLocalMs, gaugeRide, '"fit clip" readout must match the gauge');
+  // 2. Clip-local FIT ride formula must match the gauge.
+  const fitRideFromClipLocal = clipLocalPlayhead + clipIn - fitOffset; // fixed formula
+  assert.equal(fitRideFromClipLocal, gaugeRide, 'clip-local FIT ride must match the gauge');
 
   // 3. "Set sync point @ playhead" pins FIT t=0 to the playhead: after applying
   //    the new offset, the gauge ride time at the playhead must be 0.
@@ -164,6 +164,36 @@ function headTrim(clip: TimelineClip, newInMs: number): TimelineClip {
     fitRideTimeAtGlobal(reSynced, globalPlayheadMs),
     0,
     '"set sync point @ playhead" must pin FIT ride 0 to the playhead frame',
+  );
+}
+
+// --- Shared FIT anchor applies to every clip (one continuous ride timeline) ---
+{
+  const FIT_TRACK = {
+    id: FIT_ID,
+    source: 'fit' as const,
+    brand: 'test',
+    startTime: '2020-01-01T00:00:00Z',
+    fields: ['speed'],
+    frames: [{ offsetMs: 0, speed: 0 }, { offsetMs: 120_000, speed: 10 }],
+  };
+  const clip0 = makeClip({ id: 'c0', outMs: 60_000, sharedTrackSync: { [FIT_ID]: manualSync(5_000) } });
+  const clip1 = makeClip({
+    id: 'c1',
+    outMs: 60_000,
+    startGlobalMs: 60_000,
+    sharedTrackSync: { [FIT_ID]: { offsetMs: -55_000, playSpeedPercent: 100, anchor: 'utc' } },
+  });
+  const clips = applySharedFitAnchorToAllClips([clip0, clip1], FIT_ID, FIT_TRACK, 'manual', 5_000);
+
+  assert.equal(clips[0]!.sharedTrackSync[FIT_ID]!.anchor, 'manual');
+  assert.equal(clips[1]!.sharedTrackSync[FIT_ID]!.anchor, 'manual');
+  assert.equal(clips[0]!.sharedTrackSync[FIT_ID]!.offsetMs, 5_000);
+  assert.equal(clips[1]!.sharedTrackSync[FIT_ID]!.offsetMs, -55_000);
+  assert.equal(
+    effectiveSharedFitOffsetMs(clips, 1, FIT_ID),
+    -55_000,
+    'clip 2 effective offset must chain from clip 1',
   );
 }
 

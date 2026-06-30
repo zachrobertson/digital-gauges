@@ -29,7 +29,6 @@ export function ConfigPanel({
     selectedId ? s.project.gauges.find((g) => g.id === selectedId) : null,
   );
   const updateGauge = useProject((s) => s.updateGauge);
-  const removeGauge = useProject((s) => s.removeGauge);
   const { saveSingleTemplate } = useGaugeTemplates();
   const { state: namePrompt, prompt, close: closeNamePrompt } = useNamePrompt();
 
@@ -76,7 +75,6 @@ export function ConfigPanel({
       gauge={gauge}
       plugin={plugin}
       updateGauge={updateGauge}
-      removeGauge={removeGauge}
       showPreview={showPreview}
       selectedElementIds={selectedElementIds}
       onSelectElements={onSelectElements}
@@ -100,7 +98,6 @@ function ConfigPanelBody({
   gauge,
   plugin,
   updateGauge,
-  removeGauge,
   onSaveTemplate,
   showPreview = true,
   selectedElementIds,
@@ -109,7 +106,6 @@ function ConfigPanelBody({
   gauge: GaugeInstance;
   plugin: GaugePlugin;
   updateGauge: (id: string, patch: Partial<GaugeInstance>) => void;
-  removeGauge: (id: string) => void;
   onSaveTemplate?: () => void;
   showPreview?: boolean;
   selectedElementIds?: string[];
@@ -137,7 +133,6 @@ function ConfigPanelBody({
         mergedConfig={merged}
         onConfigChange={onConfigChange}
         onRectChange={onRectChange}
-        onRemove={() => removeGauge(gauge.id)}
         onSaveTemplate={onSaveTemplate}
         showPreview={showPreview}
         selectedElementIds={selectedElementIds}
@@ -181,13 +176,6 @@ function ConfigPanelBody({
         rect={gauge.rect}
         onChange={(rect) => updateGauge(gauge.id, { rect })}
       />
-
-      <button
-        className="mt-4 btn-ghost text-red-300 hover:text-red-200"
-        onClick={() => removeGauge(gauge.id)}
-      >
-        Remove gauge
-      </button>
     </div>
   );
 }

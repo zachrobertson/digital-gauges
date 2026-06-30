@@ -19,6 +19,9 @@ const api: DigitalGaugesApi = {
   loadDraft: () => ipcRenderer.invoke('session:loadDraft'),
   clearDraft: () => ipcRenderer.invoke('session:clearDraft'),
 
+  getAppSettings: () => ipcRenderer.invoke('settings:get'),
+  updateAppSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+
   startExport: (project) => ipcRenderer.invoke('export:start', project),
   startExportSegment: (jobId, clipIndex) => ipcRenderer.invoke('export:startSegment', jobId, clipIndex),
   finishExportSegment: (jobId) => ipcRenderer.invoke('export:finishSegment', jobId),
@@ -46,7 +49,6 @@ const api: DigitalGaugesApi = {
 
   listUserPlugins: () => ipcRenderer.invoke('plugins:list'),
   openUserPluginsFolder: () => ipcRenderer.invoke('plugins:openFolder'),
-  installExampleGauge: () => ipcRenderer.invoke('plugins:installExample'),
   onUserPluginsChanged: (handler) => {
     const listener = (_: unknown, plugins: UserPluginInfo[]) => handler(plugins);
     ipcRenderer.on('plugins:changed', listener);

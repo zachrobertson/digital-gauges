@@ -6,6 +6,8 @@ export interface NamePromptOptions {
   placeholder?: string;
   defaultValue?: string;
   confirmLabel?: string;
+  /** When false, clicking the dimmed backdrop does not cancel. Default true. */
+  dismissOnBackdropClick?: boolean;
 }
 
 interface PromptState extends NamePromptOptions {
@@ -20,6 +22,7 @@ export function useNamePrompt() {
 
   const prompt = useCallback((options: NamePromptOptions) => {
     return new Promise<string | null>((resolve) => {
+      (document.activeElement as HTMLElement | null)?.blur?.();
       resolveRef.current = resolve;
       setState({ ...options, open: true });
     });

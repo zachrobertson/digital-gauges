@@ -34,8 +34,7 @@ export interface FfprobeResult {
 /**
  * Wraps ffprobe -print_format json -show_format -show_streams.
  *
- * Throws if the file isn't probeable (e.g. raw `.insv` containers will
- * fail — extractors should pre-route by extension before calling this).
+ * Throws if the file isn't probeable (e.g. some proprietary containers).
  */
 export async function ffprobe(filePath: string): Promise<FfprobeResult> {
   return new Promise((resolve, reject) => {
@@ -71,11 +70,6 @@ export async function ffprobe(filePath: string): Promise<FfprobeResult> {
 /** Convenience: read the first video stream from a probe. */
 export function pickVideoStream(probe: FfprobeResult): FfprobeStream | null {
   return probe.streams.find((s) => s.codec_type === 'video') ?? null;
-}
-
-/** Convenience: read all data/metadata streams. */
-export function pickDataStreams(probe: FfprobeResult): FfprobeStream[] {
-  return probe.streams.filter((s) => s.codec_type === 'data');
 }
 
 /** Parse "30/1" or "30000/1001" → 29.97. */

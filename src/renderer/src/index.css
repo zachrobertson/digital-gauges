@@ -16,7 +16,7 @@
   --color-textdim: #9aa3ad;
   --color-textfaint: #646d78;
 
-  --font-family-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family-sans: 'JetBrains Mono', ui-monospace, monospace;
   --font-family-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
@@ -24,12 +24,17 @@
   color-scheme: dark;
 }
 
+/* Visual test: square corners on UI bounding boxes */
+*, *::before, *::after {
+  border-radius: 0 !important;
+}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -58,6 +63,20 @@ input[type='number'] {
   user-select: none;
 }
 
+input[type='number'].numeric-input-editable {
+  -webkit-user-select: text;
+  user-select: text;
+  caret-color: currentColor;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type='number'].numeric-input-editable::-webkit-outer-spin-button,
+input[type='number'].numeric-input-editable::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 button {
   cursor: pointer;
 }
@@ -75,41 +94,45 @@ select optgroup {
 }
 
 @utility select-input {
-  @apply w-full rounded-md px-2 py-1.5 text-sm text-white border border-white/10 bg-bg-elev;
+  @apply w-full px-2 py-1.5 text-sm text-white border border-white/10 bg-bg-elev;
 }
 
 @utility panel {
   @apply bg-bg-panel border border-white/[0.07];
 }
 @utility btn {
-  @apply px-3 py-1.5 rounded-md text-sm font-medium transition-colors;
+  @apply px-3 py-1.5 text-sm font-medium transition-colors;
 }
 @utility btn-primary {
-  @apply px-3 py-1.5 rounded-md text-sm font-semibold transition-colors bg-accent text-accent-ink hover:bg-accent/90;
+  @apply px-3 py-1.5 text-sm font-semibold transition-colors bg-accent text-accent-ink hover:bg-accent/90;
 }
 @utility btn-elevated {
-  @apply px-3 py-1.5 rounded-md text-sm font-medium transition-colors bg-bg-elev text-white border border-white/15 hover:bg-bg-hover;
+  @apply px-3 py-1.5 text-sm font-medium transition-colors bg-bg-elev text-white border border-white/15 hover:bg-bg-hover;
 }
 @utility btn-ghost {
-  @apply px-3 py-1.5 rounded-md text-sm font-medium transition-colors bg-bg-elev/60 hover:bg-bg-hover text-textdim border border-white/[0.07];
+  @apply px-3 py-1.5 text-sm font-medium transition-colors bg-bg-elev/60 hover:bg-bg-hover text-textdim border border-white/[0.07];
 }
 @utility btn-danger {
-  @apply px-3 py-1.5 rounded-md text-sm font-semibold transition-colors text-danger border;
+  @apply px-3 py-1.5 text-sm font-semibold transition-colors text-danger border;
   background: rgba(239, 95, 107, 0.12);
   border-color: rgba(239, 95, 107, 0.4);
 }
 @utility field-label {
   @apply text-[11px] font-semibold text-textdim uppercase tracking-wider;
 }
+/* App menu-bar trigger (File / Settings) — flat, distinct from pill tabs. */
+@utility menubar-trigger {
+  @apply inline-flex items-center px-2.5 py-1.5 text-[13px] font-medium transition-colors text-textdim hover:text-white hover:bg-bg-hover;
+}
 /* Pill-group tab container, e.g. the mode tabs in the top bar. */
 @utility tabgroup {
-  @apply flex items-center gap-1 rounded-[10px] border border-white/[0.07] bg-bg p-1;
+  @apply flex items-center gap-1 border border-white/[0.07] bg-bg p-1;
 }
 @utility tab {
-  @apply px-3.5 py-1.5 rounded-[7px] text-[13px] font-medium transition-colors text-textdim hover:text-white;
+  @apply px-3.5 py-1.5 text-[13px] font-medium transition-colors text-textdim hover:text-white;
 }
 @utility tab-active {
-  @apply px-3.5 py-1.5 rounded-[7px] text-[13px] font-semibold transition-colors bg-accent text-accent-ink;
+  @apply px-3.5 py-1.5 text-[13px] font-semibold transition-colors bg-accent text-accent-ink;
 }
 
 @keyframes processing-bar {

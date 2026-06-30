@@ -6,6 +6,7 @@ import { clamp, panelStyleFromConfig } from './common';
 import type { BarGaugeLayoutConfig } from './barGaugeSchema';
 import { defaultVideoRectForLayout } from './gaugeEditorLayout';
 import { fillColorForRatio } from './gaugeGradient';
+import { currentUnitPrefs } from '../lib/fieldConfig';
 
 interface Config extends BarGaugeLayoutConfig {
   units: 'kmh' | 'mph';
@@ -64,8 +65,10 @@ export const speedometer: GaugePlugin<Config> = {
     const displayStyle = resolveDisplayStyle(config.displayStyle);
 
     const speedMs = (frame?.speed as number | undefined) ?? 0;
-    const { value, unitLabel } = convertSpeed(speedMs, config.units);
-    const maxDisplay = config.units === 'mph'
+    // Fall back to the global speed-unit preference when the gauge has no explicit unit.
+    const units = config.units ?? currentUnitPrefs().speedUnits;
+    const { value, unitLabel } = convertSpeed(speedMs, units);
+    const maxDisplay = units === 'mph'
       ? String(Math.round(config.maxSpeedKmh * 0.621371))
       : String(config.maxSpeedKmh);
     const ratio = clamp((speedMs * 3.6) / config.maxSpeedKmh, 0, 1);

@@ -12,6 +12,7 @@ import { DATA_GAUGE_PLUGIN_ID, fieldMeta, fieldLabel } from './fieldRegistry';
 import { isDataGaugePlugin } from './dataGauge';
 import type { GaugeLayoutConfig } from './gaugeEditorLayout';
 import { isCompositeGaugeConfig } from '../lib/gaugeElementFactory';
+import { currentUnitPrefs, withGlobalUnits } from '../lib/fieldConfig';
 import { hrZoneColor } from './heartRate';
 import { powerZoneColor } from './power';
 
@@ -224,7 +225,8 @@ export function mergeElementFieldConfig(
   if (element.maxHr != null) overrides.maxHr = element.maxHr;
   if (element.maxCadence != null) overrides.maxCadence = element.maxCadence;
   if (element.maxSpeedKmh != null) overrides.maxSpeedKmh = element.maxSpeedKmh;
-  return { ...gaugeConfig, ...overrides };
+  // Element override > existing config value > global preference default.
+  return withGlobalUnits({ ...gaugeConfig, ...overrides }, currentUnitPrefs());
 }
 
 export function derivedTextForRole(

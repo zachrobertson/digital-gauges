@@ -5,10 +5,30 @@ import { tmpdir, cpus } from 'node:os';
 import { FFMPEG_BIN } from '../ffmpeg-binaries';
 import type { PreviewProgress, PreviewSegment } from '../../shared/types/ipc';
 import type { TimelineClip } from '../../shared/types/project';
+import type { PreviewResolution } from '../../shared/types/settings';
 import { clipInMs, clipOutMs } from '../../shared/timeline';
 
-const PREVIEW_MAX_WIDTH = 1280;
-const PREVIEW_MAX_HEIGHT = 720;
+interface PreviewDimensions {
+  w: number;
+  h: number;
+}
+
+const DEFAULT_PREVIEW_RESOLUTION: PreviewResolution = '720p';
+
+/** Max downscale box for a preview resolution. `source` skips the scale filter. */
+function previewMaxDimensions(res: PreviewResolution): PreviewDimensions | null {
+  switch (res) {
+    case '1080p': return { w: 1920, h: 1080 };
+    case 'source': return null;
+    case '720p':
+    default: return { w: 1280, h: 720 };
+  }
+}
+
+/** Cache key fragment so segments encoded at different resolutions don't collide. */
+function resolutionTag(maxDims: PreviewDimensions | null): string {
+  return maxDims ? `${maxDims.w}x${maxDims.h}` : 'src';
+}
 
 /**
  * Max number of trim re-encodes to run at once. Each ffmpeg/libx264 process is
@@ -21,6 +41,8 @@ export type EncodeProfile = 'preview' | 'source';
 
 export interface BuildPreviewOptions {
   profile?: EncodeProfile;
+  /** Target preview resolution (downscale cap). Ignored for the `source` profile. */
+  previewResolution?: PreviewResolution;
   /** Abort the build (kills any running ffmpeg) when the timeline changes mid-build. */
   signal?: AbortSignal;
   onProgress?: (progress: PreviewProgress) => void;
@@ -202,15 +224,15 @@ type SegmentCacheEntry = { path: string; dir: string };
 const segmentCache = new Map<string, SegmentCacheEntry>();
 const SEGMENT_CACHE_MAX = 64;
 
-function segmentKey(segments: PreviewSegment[], profile: EncodeProfile): string {
+function segmentKey(segments: PreviewSegment[], profile: EncodeProfile, resTag: string): string {
   const body = segments
     .map((s, i) => `${i}\0${s.path}\0${Math.round(s.inMs)}\0${Math.round(s.outMs)}`)
     .join('\n');
-  return `${profile}\n${body}`;
+  return `${profile}\0${resTag}\n${body}`;
 }
 
-function perClipKey(seg: PreviewSegment, profile: EncodeProfile): string {
-  return `${profile}\0${seg.path}\0${Math.round(seg.inMs)}\0${Math.round(seg.outMs)}`;
+function perClipKey(seg: PreviewSegment, profile: EncodeProfile, resTag: string): string {
+  return `${profile}\0${resTag}\0${seg.path}\0${Math.round(seg.inMs)}\0${Math.round(seg.outMs)}`;
 }
 
 class PreviewAbortError extends Error {
@@ -229,11 +251,12 @@ export function isPreviewAbortError(err: unknown): boolean {
 async function getOrEncodeSegment(
   seg: PreviewSegment,
   profile: EncodeProfile,
+  maxDims: PreviewDimensions | null,
   signal?: AbortSignal,
   reporter?: PreviewProgressReporter,
   slotIndex?: number,
 ): Promise<string> {
-  const key = perClipKey(seg, profile);
+  const key = perClipKey(seg, profile, resolutionTag(maxDims));
   const hit = segmentCache.get(key);
   if (hit) {
     // Refresh LRU recency.
@@ -248,7 +271,7 @@ async function getOrEncodeSegment(
   const dir = await mkdtemp(join(tmpdir(), 'dg-segment-'));
   const out = join(dir, 'segment.mp4');
   try {
-    await trimReencode(seg, out, profile, signal, reporter, slotIndex);
+    await trimReencode(seg, out, profile, maxDims, signal, reporter, slotIndex);
   } catch (err) {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
     throw err;
@@ -303,10 +326,17 @@ export async function buildPreviewVideo(
   const { signal, onProgress } = options;
   if (segments.length === 0) throw new Error('No clips to preview.');
 
+  // The downscale cap only applies to the preview profile; source passthrough
+  // keeps full resolution regardless of the configured preview resolution.
+  const maxDims = profile === 'preview'
+    ? previewMaxDimensions(options.previewResolution ?? DEFAULT_PREVIEW_RESOLUTION)
+    : null;
+  const resTag = resolutionTag(maxDims);
+
   const anyTrim = segments.some(isTrimmed);
   if (!anyTrim && segments.length === 1) return segments[0]!.path;
 
-  const key = segmentKey(segments, profile);
+  const key = segmentKey(segments, profile, resTag);
   const cached = cache.get(key);
   if (cached?.path) {
     onProgress?.({ phase: 'done', percent: 100, message: 'Preview ready' });
@@ -316,7 +346,7 @@ export async function buildPreviewVideo(
   const existing = inflight.get(key);
   if (existing) return existing;
 
-  const build = buildPreviewToDisk(segments, anyTrim, profile, signal, onProgress);
+  const build = buildPreviewToDisk(segments, anyTrim, profile, maxDims, signal, onProgress);
   inflight.set(key, build);
   try {
     const path = await build;
@@ -330,11 +360,12 @@ async function buildPreviewToDisk(
   segments: PreviewSegment[],
   anyTrim: boolean,
   profile: EncodeProfile,
+  maxDims: PreviewDimensions | null,
   signal?: AbortSignal,
   onProgress?: (progress: PreviewProgress) => void,
 ): Promise<string> {
   const reporter = onProgress ? new PreviewProgressReporter(onProgress) : null;
-  const key = segmentKey(segments, profile);
+  const key = segmentKey(segments, profile, resolutionTag(maxDims));
   const prevEntry = cache.get(key);
 
   const tempDir = await mkdtemp(join(tmpdir(), 'dg-preview-'));
@@ -364,6 +395,9 @@ async function buildPreviewToDisk(
       reporter?.markProbingDone();
 
       const encodeProfile: EncodeProfile = reencode.some((r) => !r) ? 'source' : profile;
+      // When downgraded to source (mixed trimmed/untrimmed), keep full resolution
+      // so re-encoded parts match the passthrough clips for stream-copy concat.
+      const encodeDims = encodeProfile === 'preview' ? maxDims : null;
 
       const segPaths = new Array<string>(segments.length);
       const encodeTasks: Array<() => Promise<void>> = [];
@@ -374,7 +408,7 @@ async function buildPreviewToDisk(
           const idx = i;
           const currentSlot = slotIndex++;
           encodeTasks.push(async () => {
-            segPaths[idx] = await getOrEncodeSegment(seg, encodeProfile, signal, reporter ?? undefined, currentSlot);
+            segPaths[idx] = await getOrEncodeSegment(seg, encodeProfile, encodeDims, signal, reporter ?? undefined, currentSlot);
           });
         } else {
           segPaths[i] = segments[i]!.path;
@@ -441,6 +475,7 @@ async function trimReencode(
   seg: PreviewSegment,
   outPath: string,
   profile: EncodeProfile,
+  maxDims: PreviewDimensions | null,
   signal?: AbortSignal,
   reporter?: PreviewProgressReporter,
   slotIndex?: number,
@@ -455,10 +490,12 @@ async function trimReencode(
     '-t', String(durSec),
   ];
 
-  if (profile === 'preview') {
+  // Downscale only for the preview profile with a resolution cap; `source`
+  // resolution (maxDims null) keeps full resolution.
+  if (profile === 'preview' && maxDims) {
     args.push(
       '-vf',
-      `scale=${PREVIEW_MAX_WIDTH}:${PREVIEW_MAX_HEIGHT}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2`,
+      `scale=${maxDims.w}:${maxDims.h}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2`,
     );
   }
 

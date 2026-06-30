@@ -1,6 +1,7 @@
 import type { GaugePlugin } from '@shared/types';
 import { appearanceDefaults, appearanceSchemaProperties } from './appearanceSchema';
 import { fillPanel, panelStyleFromConfig, withGaugeBoundsClip } from './common';
+import { DEFAULT_FONT_FAMILY } from '../lib/fonts';
 import { defaultVideoRectForLayout, withLayoutVideoTransform, type TextRole } from './gaugeEditorLayout';
 import {
   drawLegacyLayoutTextInLayoutSpace,
@@ -192,7 +193,7 @@ function renderCustomGpsGauge(
 
       if (route.length < 2 && lat === undefined) {
         ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        ctx.font = `500 ${Math.floor(sizeScale * 0.11 * (panelStyle.fontScale ?? 1))}px ${panelStyle.fontFamily ?? 'Inter'}, system-ui, sans-serif`;
+        ctx.font = `500 ${Math.floor(sizeScale * 0.11 * (panelStyle.fontScale ?? 1))}px ${panelStyle.fontFamily ?? DEFAULT_FONT_FAMILY}, ui-monospace, monospace`;
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'center';
         ctx.fillText('no GPS', mapRect.x + mapRect.w / 2, mapRect.y + mapRect.h / 2);

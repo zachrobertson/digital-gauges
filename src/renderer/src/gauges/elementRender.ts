@@ -2,6 +2,7 @@ import type { GaugeElement } from '@shared/types/gaugeElement';
 import type { TelemetryFrame } from '@shared/types';
 import type { PanelStyle } from './common';
 import { clamp, roundRect } from './common';
+import { DEFAULT_FONT_FAMILY } from '../lib/fonts';
 import {
   arcGeometry,
   arcPath,
@@ -106,13 +107,8 @@ function fillBarRect(
   y: number,
   w: number,
   h: number,
-  rounded: boolean,
+  _rounded: boolean,
 ): void {
-  if (rounded && w > 0 && h > 0) {
-    roundRect(ctx, x, y, w, h, h / 2);
-    ctx.fill();
-    return;
-  }
   ctx.fillRect(x, y, w, h);
 }
 
@@ -133,7 +129,7 @@ export function renderGaugeElement(options: ElementRenderOptions): void {
   const { ctx, element, frame, gaugeConfig, panelStyle } = options;
   if (!element.visible) return;
 
-  const fontFamily = panelStyle.fontFamily ?? 'Inter';
+  const fontFamily = panelStyle.fontFamily ?? DEFAULT_FONT_FAMILY;
   const fontScale = panelStyle.fontScale ?? 1;
   const elementGradient = element.kind === 'bar' || element.kind === 'arc'
     ? element.fillGradient

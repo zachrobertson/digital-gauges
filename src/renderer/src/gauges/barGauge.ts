@@ -1,5 +1,6 @@
 import type { PanelStyle } from './common';
 import { clamp, drawBigNumber, drawLabel, fillPanel, roundRect, unitFont, withGaugeBoundsClip } from './common';
+import { DEFAULT_FONT_FAMILY } from '../lib/fonts';
 import type { BarGaugeDisplayStyle, BarGaugeTextLayout } from './barGaugeSchema';
 import { resolveArcTickCount } from './barGaugeSchema';
 import type { TextRole } from './gaugeEditorLayout';
@@ -132,13 +133,8 @@ function fillBarRect(
   y: number,
   w: number,
   h: number,
-  rounded: boolean,
+  _rounded: boolean,
 ): void {
-  if (rounded && w > 0 && h > 0) {
-    roundRect(ctx, x, y, w, h, h / 2);
-    ctx.fill();
-    return;
-  }
   ctx.fillRect(x, y, w, h);
 }
 
@@ -172,7 +168,7 @@ function renderCustomArcGauge(input: BarGaugeRenderInput, layout: LegacyGaugeLay
     scaleMinLabel = '0', scaleMaxLabel = 'MAX',
   } = input;
   fillPanel(ctx, layout.gaugeRect, panelStyle);
-  const family = panelStyle.fontFamily ?? 'Inter';
+  const family = panelStyle.fontFamily ?? DEFAULT_FONT_FAMILY;
   const fontScale = panelStyle.fontScale ?? 1;
   const clamped = clamp(ratio, 0, 1);
 
@@ -252,7 +248,7 @@ function renderHorizontalBarGauge(input: BarGaugeRenderInput): void {
   const textBottom = barY - pad * 0.35;
   const cx = rect.x + rect.w / 2;
   const scale = panelStyle.fontScale ?? 1;
-  const family = panelStyle.fontFamily ?? 'Inter';
+  const family = panelStyle.fontFamily ?? DEFAULT_FONT_FAMILY;
 
   const valueSize = rect.h * 0.46 * scale;
   const labelSize = rect.h * 0.12 * scale;
@@ -359,7 +355,7 @@ function renderArcGauge(input: BarGaugeRenderInput): void {
   } = input;
   const pad = Math.max(6, rect.w * 0.05);
   const scale = panelStyle.fontScale ?? 1;
-  const family = panelStyle.fontFamily ?? 'Inter';
+  const family = panelStyle.fontFamily ?? DEFAULT_FONT_FAMILY;
   const clamped = clamp(ratio, 0, 1);
 
   const innerTop = rect.y + pad;
@@ -377,7 +373,8 @@ function renderArcGauge(input: BarGaugeRenderInput): void {
   const valueAngle = dialDegToCanvasRad(valueUserDeg);
 
   ctx.save();
-  roundRect(ctx, rect.x + pad * 0.4, innerTop, rect.w - pad * 0.8, innerH, Math.min(innerH * 0.1, 12));
+  ctx.beginPath();
+  ctx.rect(rect.x + pad * 0.4, innerTop, rect.w - pad * 0.8, innerH);
   ctx.clip();
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
   ctx.fillRect(rect.x, innerTop, rect.w, innerH);

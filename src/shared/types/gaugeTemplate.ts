@@ -5,6 +5,8 @@ export interface GaugeTemplateGaugeSpec {
   config: Record<string, unknown>;
   rect?: GaugeRect;
   z?: number;
+  /** User-defined gauge list label; omitted when unset. */
+  name?: string;
 }
 
 export interface GaugeTemplateFile {
@@ -24,6 +26,4 @@ export interface GaugeTemplateSummary {
   type: 'single' | 'layout';
   updatedAt: string;
   filePath: string;
-  /** Bundled starter templates are tagged 'builtin' and cannot be deleted. */
-  source?: 'builtin' | 'user';
 }

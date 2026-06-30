@@ -65,7 +65,7 @@ export const GAUGE_FONTS: FontDef[] = [
   { value: 'Michroma', label: 'Michroma', weights: [400] },
 ];
 
-export const DEFAULT_FONT_FAMILY = 'Inter';
+export const DEFAULT_FONT_FAMILY = 'JetBrains Mono';
 
 /** Family names for schema enums. */
 export const FONT_FAMILY_VALUES = GAUGE_FONTS.map((f) => f.value);

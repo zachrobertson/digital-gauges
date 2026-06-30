@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useProject } from '../store/project';
-import { projectFileLabel } from './projectSession';
+import { projectFileLabel, projectNameFromPath } from './projectSession';
 
 /**
  * On first launch, offer to restore an autosaved draft or reopen the last project.
@@ -39,7 +39,10 @@ export function useSessionRecovery() {
         if (!reopen) return;
         try {
           const project = await window.api.loadProject(info.lastProjectPath);
-          useProject.getState().setProject(project);
+          useProject.getState().setProject({
+            ...project,
+            name: projectNameFromPath(info.lastProjectPath),
+          });
           useProject.getState().setProjectFilePath(info.lastProjectPath);
         } catch (e) {
           alert(`Could not open last project: ${(e as Error).message}`);

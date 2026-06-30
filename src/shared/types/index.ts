@@ -8,3 +8,4 @@ export * from './ipc';
 export * from './gaugeTemplate';
 export * from './gaugeElement';
 export * from './fillGradient';
+export * from './settings';

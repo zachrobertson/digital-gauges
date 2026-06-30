@@ -52,11 +52,10 @@ export function isEllipseFrame(config: FrameStyleConfig): boolean {
 
 /** Clamp configured corner radius to the rectangle bounds. */
 export function frameCornerRadiusPx(
-  cornerRadius: number,
-  rect: { w: number; h: number },
+  _cornerRadius: number,
+  _rect: { w: number; h: number },
 ): number {
-  if (cornerRadius >= PILL_CORNER_RADIUS) return Math.min(rect.w, rect.h) / 2;
-  return Math.min(Math.max(0, cornerRadius), rect.w / 2, rect.h / 2);
+  return 0;
 }
 
 export function panelEllipseGeometry(rect: { x: number; y: number; w: number; h: number }): {

@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "id": "example-speed-bar",
+  "name": "Speedometer bar",
+  "type": "single",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "gauge": {
+    "config": {
+      "panelOpacity": 0.65,
+      "panelBg": "#0b0d10",
+      "panelBorder": "transparent",
+      "fontScale": 1,
+      "fontFamily": "Inter",
+      "frameShape": "rectangle",
+      "frameCornerRadius": 0,
+      "displayStyle": "bar",
+      "textLayout": "standard",
+      "showScaleLabels": false,
+      "showArcTicks": true,
+      "arcTickCount": 8,
+      "trailColor": "#3ddc97",
+      "cursorColor": "#ffffff",
+      "routeScope": "video",
+      "units": "kmh",
+      "maxSpeedKmh": 80,
+      "scaleMax": 80,
+      "color": "#3ddc97",
+      "field": "speed",
+      "layout": {
+        "gaugeRect": { "x": 100, "y": 45, "w": 280, "h": 180 },
+        "elements": [
+          {
+            "id": "e4b8c2a1-7f3d-4a9e-b5c1-2d8e6f0a4b3c",
+            "visible": true,
+            "kind": "bar",
+            "field": "speed",
+            "rect": { "x": 118, "y": 192.6, "w": 244, "h": 14.4 },
+            "rounded": true,
+            "color": "default"
+          }
+        ]
+      }
+    }
+  }
+}

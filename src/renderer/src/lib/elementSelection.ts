@@ -5,17 +5,15 @@ export function selectOne(id: string): string[] {
   return [id];
 }
 
-/** Replace selection, expanding to full groups unless deepEdit (Alt+click). */
+/** Replace selection, expanding to full groups when the clicked element belongs to one. */
 export function selectElement(
   elements: GaugeElement[],
   id: string,
-  options: { shiftKey?: boolean; deepEdit?: boolean; current?: string[] },
+  options: { shiftKey?: boolean; current?: string[] },
 ): string[] {
-  const { shiftKey, deepEdit, current = [] } = options;
+  const { shiftKey, current = [] } = options;
   if (shiftKey) return toggleInSelection(current, id);
-  const base = selectOne(id);
-  if (deepEdit) return base;
-  return expandSelectionToGroups(elements, base);
+  return expandSelectionToGroups(elements, selectOne(id));
 }
 
 export function toggleInSelection(current: string[], id: string): string[] {

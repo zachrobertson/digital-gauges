@@ -9,18 +9,25 @@ import { useProjectAutosave } from './lib/useProjectAutosave';
 import { useSessionRecovery } from './lib/useSessionRecovery';
 import { useExport } from './lib/useExport';
 import { PreviewVideoProvider } from './lib/PreviewVideoProvider';
+import { canCloseGaugeEditorOnEscape } from './lib/useGaugeEditorSession';
 import { useProject } from './store/project';
 import { usePlugins } from './store/plugins';
+import { usePreferences } from './store/preferences';
 
 export default function App() {
   const setUserPlugins = usePlugins((s) => s.setUserPlugins);
   const mode = useProject((s) => s.workspaceMode);
   const busyMessage = useProject((s) => s.busyMessage);
+  const loadSettings = usePreferences((s) => s.loadSettings);
 
   // Global hooks hoisted to the app root so they survive workspace switches.
   useProjectAutosave();
   useSessionRecovery();
   const exportApi = useExport();
+
+  useEffect(() => {
+    loadSettings().catch(() => {});
+  }, [loadSettings]);
 
   useEffect(() => {
     window.api.listUserPlugins().then(setUserPlugins).catch(() => {});
@@ -30,14 +37,24 @@ export default function App() {
     return off;
   }, [setUserPlugins]);
 
-  // Escape clears gauge selection — only meaningful while designing gauges.
+  // Escape clears gauge selection after element and frame bounds are dismissed.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.tagName === 'INPUT'
+        || target?.tagName === 'TEXTAREA'
+        || target?.tagName === 'SELECT'
+        || target?.isContentEditable
+      ) {
+        return;
+      }
       const { selectedGaugeId, selectGauge, workspaceMode } = useProject.getState();
       if (workspaceMode !== 'gauges' && workspaceMode !== 'edit') return;
       if (!selectedGaugeId) return;
+      if (!canCloseGaugeEditorOnEscape(selectedGaugeId)) return;
       e.preventDefault();
       selectGauge(null);
     };

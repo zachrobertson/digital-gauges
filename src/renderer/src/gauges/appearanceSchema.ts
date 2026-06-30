@@ -1,5 +1,5 @@
 import type { JSONSchemaProperty } from '@shared/types';
-import { FONT_FAMILY_VALUES } from '../lib/fonts';
+import { DEFAULT_FONT_FAMILY, FONT_FAMILY_VALUES } from '../lib/fonts';
 
 /** Selectable gauge fonts — single source of truth lives in lib/fonts.ts. */
 export const FONT_PRESETS = FONT_FAMILY_VALUES;
@@ -43,7 +43,7 @@ export const appearanceSchemaProperties: Record<string, JSONSchemaProperty> = {
     title: 'Font',
     enum: [...FONT_PRESETS],
     format: 'font',
-    default: 'Inter',
+    default: DEFAULT_FONT_FAMILY,
     group: 'Appearance',
   },
   frameShape: {
@@ -71,7 +71,7 @@ export const appearanceDefaults = {
   panelBg: '#0b0d10',
   panelBorder: 'transparent',
   fontScale: 1,
-  fontFamily: 'Inter' as const,
+  fontFamily: DEFAULT_FONT_FAMILY,
   frameShape: 'rectangle' as const,
   frameCornerRadius: 0,
 };

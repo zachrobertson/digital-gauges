@@ -57,4 +57,5 @@ src/
 └── shared/types/          IPC contract types
 ```
 
-See `docs/writing-gauges.md` for the user-gauge plugin format.
+See `docs/writing-gauges.md` for the user-gauge plugin format and
+`docs/gauge-templates.md` for saved gauge templates and example presets.

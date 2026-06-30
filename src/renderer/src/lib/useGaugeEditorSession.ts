@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 interface PerGaugeState {
   selectedElementIds: string[];
+  /** Panel frame outline + resize handles in the stage preview. */
+  showFrameBounds: boolean;
   showGrid: boolean;
   snapEnabled: boolean;
   gridSize: number;
@@ -16,6 +18,7 @@ const STORAGE_KEY = 'dg-gauge-editor-session';
 function defaultPerGauge(): PerGaugeState {
   return {
     selectedElementIds: [],
+    showFrameBounds: true,
     showGrid: true,
     snapEnabled: true,
     gridSize: 12,
@@ -45,6 +48,18 @@ function saveSession(state: SessionState) {
   }
 }
 
+function readPerGaugeState(gaugeId: string): PerGaugeState {
+  const state = loadSession().byGauge[gaugeId];
+  if (!state) return defaultPerGauge();
+  return { ...defaultPerGauge(), ...state };
+}
+
+/** True when Escape should deselect the gauge (no element or frame bounds active). */
+export function canCloseGaugeEditorOnEscape(gaugeId: string): boolean {
+  const state = readPerGaugeState(gaugeId);
+  return state.selectedElementIds.length === 0 && !state.showFrameBounds;
+}
+
 /** Shared gauge editor UI state for Gauges tab and Edit tab (per gauge). */
 export function useGaugeEditorSession(gaugeId: string | null) {
   const [session, setSession] = useState<SessionState>(loadSession);
@@ -70,13 +85,17 @@ export function useGaugeEditorSession(gaugeId: string | null) {
 
   const patchGauge = useCallback((patch: Partial<PerGaugeState>) => {
     if (!gaugeId) return;
-    setSession((prev) => ({
-      ...prev,
-      byGauge: {
-        ...prev.byGauge,
-        [gaugeId]: { ...(prev.byGauge[gaugeId] ?? defaultPerGauge()), ...patch },
-      },
-    }));
+    setSession((prev) => {
+      const next = {
+        ...prev,
+        byGauge: {
+          ...prev.byGauge,
+          [gaugeId]: { ...(prev.byGauge[gaugeId] ?? defaultPerGauge()), ...patch },
+        },
+      };
+      saveSession(next);
+      return next;
+    });
   }, [gaugeId]);
 
   const setSelectedElementIds = useCallback((ids: string[]) => {
@@ -86,6 +105,8 @@ export function useGaugeEditorSession(gaugeId: string | null) {
   return {
     selectedElementIds: gaugeState.selectedElementIds,
     setSelectedElementIds,
+    showFrameBounds: gaugeState.showFrameBounds,
+    setShowFrameBounds: (v: boolean) => patchGauge({ showFrameBounds: v }),
     showGrid: gaugeState.showGrid,
     setShowGrid: (v: boolean) => patchGauge({ showGrid: v }),
     snapEnabled: gaugeState.snapEnabled,

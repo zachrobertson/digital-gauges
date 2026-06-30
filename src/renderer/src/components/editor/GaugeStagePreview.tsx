@@ -30,6 +30,8 @@ interface Props {
   snapEnabled?: boolean;
   onSnapEnabledChange?: (v: boolean) => void;
   gridSize?: number;
+  showFrameBounds?: boolean;
+  onShowFrameBoundsChange?: (visible: boolean) => void;
 }
 
 export function GaugeStagePreview({
@@ -44,6 +46,8 @@ export function GaugeStagePreview({
   snapEnabled: snapEnabledProp,
   onSnapEnabledChange,
   gridSize = 12,
+  showFrameBounds: showFrameBoundsProp,
+  onShowFrameBoundsChange,
 }: Props) {
   const project = useProject((s) => s.project);
   const [previewRatio, setPreviewRatio] = useState(0.62);
@@ -54,8 +58,11 @@ export function GaugeStagePreview({
   const snapEnabled = snapEnabledProp ?? snapEnabledLocal;
   const setSnapEnabled = onSnapEnabledChange ?? setSnapEnabledLocal;
   const [internalSelectedIds, setInternalSelectedIds] = useState<string[]>([]);
+  const [showFrameBoundsLocal, setShowFrameBoundsLocal] = useState(true);
   const selectedElementIds = selectedElementIdsProp ?? internalSelectedIds;
   const setSelectedElementIds = onSelectElements ?? setInternalSelectedIds;
+  const showFrameBounds = showFrameBoundsProp ?? showFrameBoundsLocal;
+  const setShowFrameBounds = onShowFrameBoundsChange ?? setShowFrameBoundsLocal;
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [side, setSide] = useState(0);
@@ -90,6 +97,8 @@ export function GaugeStagePreview({
     enabled: !unsupported && !!editorKind && !!meta,
     selectedElementIds,
     onSelectElements: setSelectedElementIds,
+    showFrameBounds,
+    onShowFrameBoundsChange: setShowFrameBounds,
     layout,
     onLayoutChange: setLayout,
     gridSize,
@@ -153,6 +162,7 @@ export function GaugeStagePreview({
           showGrid={showGrid}
           snapEnabled={snapEnabled}
           gridSize={gridSize}
+          showFrameBounds={showFrameBounds}
         />
       </div>
       <div className="flex items-center gap-4 text-xs text-white/60">

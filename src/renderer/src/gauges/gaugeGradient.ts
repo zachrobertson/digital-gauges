@@ -195,20 +195,15 @@ export function fillBarWithGradient(
   h: number,
   ratio: number,
   stops: FillGradientStop[],
-  rounded: boolean,
-  roundRectPath: (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => void,
+  _rounded: boolean,
+  _roundRectPath: (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => void,
 ): void {
   if (w <= 0 || h <= 0) return;
   const fillW = Math.max(1, w * clampRatio(ratio));
   ctx.save();
-  if (rounded) {
-    roundRectPath(ctx, x, y, fillW, h, h / 2);
-    ctx.clip();
-  } else {
-    ctx.beginPath();
-    ctx.rect(x, y, fillW, h);
-    ctx.clip();
-  }
+  ctx.beginPath();
+  ctx.rect(x, y, fillW, h);
+  ctx.clip();
   const grad = ctx.createLinearGradient(x, y, x + w, y);
   addStopsToLinearGradient(grad, stops);
   ctx.fillStyle = grad;

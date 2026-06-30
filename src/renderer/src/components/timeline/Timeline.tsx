@@ -147,7 +147,7 @@ const SyncViewerPanel = memo(function SyncViewerPanel({
   fitOffset,
   fitScope,
   clipDur,
-  linkLocked,
+  fitDragEnabled,
 }: {
   project: Project;
   selectedClip: TimelineClip;
@@ -156,7 +156,7 @@ const SyncViewerPanel = memo(function SyncViewerPanel({
   fitOffset: number;
   fitScope: 'local' | 'shared';
   clipDur: number;
-  linkLocked: boolean;
+  fitDragEnabled: boolean;
 }) {
   const playhead = useProject((s) => s.playhead);
   const setClipOffset = useProject((s) => s.setClipOffset);
@@ -186,20 +186,16 @@ const SyncViewerPanel = memo(function SyncViewerPanel({
       selectedClipStartMs={selectedClipStartMs}
       totalDurationMs={totalDur}
       clipBoundariesMs={boundaries}
-      linkLocked={linkLocked}
+      fitDragEnabled={fitDragEnabled}
       onOffsetChange={(ms) => setClipOffset(selectedClip.id, fitTrack.id, ms, fitScope)}
     />
   );
 });
 
-interface TimelineProps {
-  linkLocked: boolean;
-}
-
 /**
  * Sync timeline strip — global ruler, optional GPS map, and waveform viewer.
  */
-export function Timeline({ linkLocked }: TimelineProps) {
+export function Timeline() {
   const project = useProject((s) => s.project);
   const selectedClipId = useProject((s) => s.selectedClipId);
 
@@ -224,6 +220,12 @@ export function Timeline({ linkLocked }: TimelineProps) {
       ? effectiveSharedFitOffsetMs(project.clips, selectedClipIndex, fitTrack.id)
       : trackOffsetMs(selectedClip.localTrackSync, fitTrack.id))
     : 0;
+  const fitSync = fitTrack && selectedClip
+    ? (fitScope === 'local'
+      ? selectedClip.localTrackSync[fitTrack.id]
+      : selectedClip.sharedTrackSync[fitTrack.id])
+    : undefined;
+  const fitDragEnabled = fitSync?.anchor === 'manual';
 
   return (
     <div className="panel border-t flex flex-col flex-1 min-h-[340px] overflow-x-hidden">
@@ -240,7 +242,7 @@ export function Timeline({ linkLocked }: TimelineProps) {
             fitOffset={fitOffset}
             fitScope={fitScope}
             clipDur={clipDur}
-            linkLocked={linkLocked}
+            fitDragEnabled={fitDragEnabled}
           />
         </div>
       ) : (

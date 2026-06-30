@@ -14,7 +14,7 @@ import {
   projectDurationMs,
 } from '@shared/timeline';
 import type { TimelineClip, VideoOverlayClip } from '@shared/types';
-import { formatOffsetMs, videoUtcMs } from '@shared/sync';
+import { formatOffsetMs } from '@shared/sync';
 
 function fmtClock(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
@@ -30,7 +30,6 @@ export function EditWorkspace() {
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex flex-1 min-h-0">
-        <GaugePlacementSidebar />
         <main className="flex-1 min-w-0 flex flex-col bg-[#0c1014]">
           {clips.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-textfaint text-sm">
@@ -48,94 +47,69 @@ export function EditWorkspace() {
 }
 
 /**
- * Lists the gauges configured in the Gauges tab and lets you place them onto the
- * video. Placed gauges render in the live overlay and can be dragged on the
- * footage; unplaced ("configured") gauges stay off the video.
+ * Lists gauges configured in the Gauges tab and lets you place them on the video.
  */
-function GaugePlacementSidebar() {
+function GaugePlacementSection() {
   const gauges = useProject((s) => s.project.gauges);
   const selectedGaugeId = useProject((s) => s.selectedGaugeId);
   const selectGauge = useProject((s) => s.selectGauge);
   const updateGauge = useProject((s) => s.updateGauge);
-  const setWorkspaceMode = useProject((s) => s.setWorkspaceMode);
 
   const sorted = useMemo(() => [...gauges].sort((a, b) => b.z - a.z), [gauges]);
   const placedCount = gauges.filter((g) => g.placed !== false).length;
 
   return (
-    <aside className="w-56 shrink-0 bg-bg-panel border-r border-white/[0.07] p-3.5 overflow-y-auto flex flex-col gap-3">
-      <div className="flex items-center">
+    <div>
+      <div className="flex items-center mb-3">
         <span className="field-label">Gauges on video</span>
         <span className="ml-auto text-[11px] font-mono text-textfaint">{placedCount}/{gauges.length}</span>
       </div>
 
-      {gauges.length === 0 ? (
-        <div className="rounded-[10px] bg-bg border border-dashed border-white/[0.16] p-3 flex flex-col gap-2">
-          <p className="text-xs text-textfaint leading-relaxed">
-            No gauges yet. Create and style gauges in the Gauges tab, then place them on the video here.
-          </p>
-          <button type="button" className="btn-elevated text-xs" onClick={() => setWorkspaceMode('gauges')}>
-            Go to Gauges
-          </button>
+      {gauges.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {sorted.map((g) => {
+            const plugin = findPluginById(g.pluginId);
+            const merged = { ...plugin?.defaultConfig, ...g.config };
+            const unsupported = isDataGaugePlugin(g.pluginId) && isUnsupportedGaugeConfig(merged);
+            const label = isDataGaugePlugin(g.pluginId)
+              ? gaugeDisplayLabel(g, merged)
+              : (plugin?.name ?? g.pluginId);
+            const isPlaced = g.placed !== false;
+            const isSel = g.id === selectedGaugeId;
+            return (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => {
+                  if (isSel) {
+                    updateGauge(g.id, { placed: !isPlaced });
+                  } else {
+                    selectGauge(g.id);
+                    if (!isPlaced) updateGauge(g.id, { placed: true });
+                  }
+                }}
+                title={
+                  isPlaced
+                    ? isSel
+                      ? 'Click again to remove from video'
+                      : 'Select gauge on video'
+                    : 'Click to place on video'
+                }
+                className={`w-full text-left rounded-lg border px-2 py-1.5 text-xs transition-colors ${
+                  isPlaced
+                    ? 'border-accent bg-accent/10 text-white'
+                    : 'border-white/[0.07] bg-bg-elev'
+                }`}
+              >
+                <span className="font-medium">{label}</span>
+                {unsupported && <span className="ml-1 text-[10px] text-amber-300/70">!</span>}
+                {!isPlaced && <span className="ml-1.5 text-[10px] text-textfaint">configured</span>}
+              </button>
+            );
+          })}
         </div>
-      ) : (
-        <>
-          <div className="flex flex-col gap-1.5">
-            {sorted.map((g) => {
-              const plugin = findPluginById(g.pluginId);
-              const merged = { ...plugin?.defaultConfig, ...g.config };
-              const unsupported = isDataGaugePlugin(g.pluginId) && isUnsupportedGaugeConfig(merged);
-              const label = isDataGaugePlugin(g.pluginId)
-                ? gaugeDisplayLabel(g, merged)
-                : (plugin?.name ?? g.pluginId);
-              const isPlaced = g.placed !== false;
-              const isSel = g.id === selectedGaugeId;
-              return (
-                <div
-                  key={g.id}
-                  className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${
-                    isSel ? 'border-accent bg-accent/10' : 'border-white/[0.07] bg-bg-elev'
-                  }`}
-                >
-                  <button
-                    type="button"
-                    className="flex-1 min-w-0 text-left text-xs truncate"
-                    onClick={() => selectGauge(g.id)}
-                    title="Select gauge"
-                  >
-                    <span className="font-medium">{label}</span>
-                    {unsupported && <span className="ml-1 text-[10px] text-amber-300/70">!</span>}
-                    {!isPlaced && <span className="ml-1.5 text-[10px] text-textfaint">configured</span>}
-                  </button>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={isPlaced}
-                    title={isPlaced ? 'Remove from video' : 'Place on video'}
-                    onClick={() => {
-                      updateGauge(g.id, { placed: !isPlaced });
-                      if (!isPlaced) selectGauge(g.id);
-                    }}
-                    className={`shrink-0 w-9 h-5 rounded-full p-0.5 flex transition-colors ${
-                      isPlaced ? 'bg-accent justify-end' : 'bg-bg-hover justify-start'
-                    }`}
-                  >
-                    <span className={`w-4 h-4 rounded-full ${isPlaced ? 'bg-accent-ink' : 'bg-textfaint'}`} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-          <p className="text-[10.5px] text-textfaint leading-relaxed">
-            Toggle a gauge onto the video, then drag it to position and use the handles to resize.
-            Style and data are edited in the Gauges tab.
-          </p>
-          <button type="button" className="btn-elevated text-xs" onClick={() => setWorkspaceMode('gauges')}>
-            Edit Gauge
-          </button>
-        </>
       )}
-    </aside>
+    </div>
   );
 }
 
@@ -194,9 +168,7 @@ function ClipInspector() {
           </button>
         </div>
 
-        {clips.length === 0 ? (
-          <p className="text-xs text-textfaint">No clips yet.</p>
-        ) : (
+        {clips.length > 0 && (
           <div className="flex flex-col gap-1.5">
             {clips.map((clip) => {
               const selected = clip.id === selectedClipId;
@@ -282,9 +254,7 @@ function ClipInspector() {
           </div>
         </div>
 
-        {fitEntries.length === 0 ? (
-          <p className="text-xs text-textfaint">No FIT data yet.</p>
-        ) : (
+        {fitEntries.length > 0 && (
           <div className="flex flex-col gap-1.5">
             {fitEntries.map((entry) => (
               <div
@@ -304,6 +274,10 @@ function ClipInspector() {
           </div>
         )}
       </div>
+
+      <div className="h-px bg-white/[0.07]" />
+
+      <GaugePlacementSection />
     </aside>
   );
 }
@@ -331,8 +305,6 @@ function OverlayInspectorSection({
   const moveOverlayZ = useProject((s) => s.moveOverlayZ);
 
   const selected = overlays.find((o) => o.id === selectedOverlayId) ?? null;
-  const hasTimestampMeta = selected ? videoUtcMs(selected.media) != null : false;
-  const baseHasUtc = clips.some((c) => videoUtcMs(c.media) != null);
 
   return (
     <div>
@@ -348,9 +320,7 @@ function OverlayInspectorSection({
         </button>
       </div>
 
-      {overlays.length === 0 ? (
-        <p className="text-xs text-textfaint">PiP / B-roll overlays appear on a second timeline track.</p>
-      ) : (
+      {overlays.length > 0 && (
         <div className="flex flex-col gap-1.5 mb-3">
           {overlays.map((overlay) => {
             const isSel = overlay.id === selectedOverlayId;
@@ -403,12 +373,6 @@ function OverlayInspectorSection({
               Manual
             </button>
           </div>
-
-          {selected.alignMode === 'timestamp' && (!hasTimestampMeta || !baseHasUtc) && (
-            <p className="text-[10.5px] text-warn leading-relaxed">
-              Missing creation_time on { !hasTimestampMeta ? 'overlay' : 'base clip' } — use Manual or add metadata.
-            </p>
-          )}
 
           <label className="flex flex-col gap-1">
             <span className="text-[10.5px] text-textfaint">Offset {formatOffsetMs(selected.offsetMs ?? 0)}</span>
@@ -543,7 +507,6 @@ function EditTimeline() {
   const playhead = useProject((s) => s.playhead);
   const setPlayhead = useProject((s) => s.setPlayhead);
   const setPlaying = useProject((s) => s.setPlaying);
-  const { importAsOverlay } = useMediaImport();
   const busy = useProject((s) => s.busyMessage);
 
   const trackRef = useRef<HTMLDivElement>(null);
@@ -810,14 +773,6 @@ function EditTimeline() {
         </button>
         <button
           type="button"
-          className="btn-elevated text-xs"
-          disabled={busy !== null}
-          onClick={() => void importAsOverlay()}
-        >
-          + Add overlay
-        </button>
-        <button
-          type="button"
           className="btn-danger text-xs disabled:opacity-40"
           title="Ripple delete selected clip"
           disabled={selectedIndex < 0}
@@ -1041,10 +996,6 @@ function EditTimeline() {
           <Playhead pct={headPct} />
         </div>
 
-        <div className="flex items-center mt-2 text-[11px] text-textfaint">
-          <span>Click ruler to scrub · drag clips to reorder · overlay track below for PiP</span>
-          <span className="ml-auto">Split at playhead · ripple delete</span>
-        </div>
       </div>
     </div>
   );

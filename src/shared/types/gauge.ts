@@ -92,4 +92,6 @@ export interface GaugeInstance {
    * projects, where every gauge was always on the video).
    */
   placed?: boolean;
+  /** User-defined label in the gauge list; falls back to auto-generated name when unset. */
+  name?: string;
 }

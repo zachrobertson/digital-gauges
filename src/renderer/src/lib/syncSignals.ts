@@ -1,5 +1,11 @@
-import type { TelemetryField, TelemetryFrame, TelemetryTrack } from '@shared/types';
+import type { AppSettings, TelemetryField, TelemetryFrame, TelemetryTrack } from '@shared/types';
 import { sampleAt } from './telemetry';
+
+export type FieldFormatPrefs = Pick<AppSettings, 'speedUnits' | 'distanceUnits'>;
+
+const KMH_PER_MS = 3.6;
+const MPH_PER_MS = 2.23693629;
+const M_PER_MILE = 1609.344;
 
 const STEP_MS = 500;
 
@@ -108,18 +114,34 @@ export function normalizeSeries(values: (number | null)[]): number[] {
   return values.map((v) => (v === null ? 0 : (v - min) / (max - min)));
 }
 
-export function formatFieldValue(field: TelemetryField, v: number | null | undefined): string {
+function formatSpeed(v: number, prefs?: FieldFormatPrefs): string {
+  return prefs?.speedUnits === 'mph'
+    ? `${(v * MPH_PER_MS).toFixed(1)} mph`
+    : `${(v * KMH_PER_MS).toFixed(1)} km/h`;
+}
+
+function formatDistance(v: number, prefs?: FieldFormatPrefs): string {
+  return prefs?.distanceUnits === 'mi'
+    ? `${(v / M_PER_MILE).toFixed(2)} mi`
+    : `${(v / 1000).toFixed(2)} km`;
+}
+
+export function formatFieldValue(
+  field: TelemetryField,
+  v: number | null | undefined,
+  prefs?: FieldFormatPrefs,
+): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return '—';
   switch (field) {
-    case 'speed': return `${(v * 3.6).toFixed(1)} km/h`;
+    case 'speed': return formatSpeed(v, prefs);
     case 'power': return `${Math.round(v)} W`;
     case 'hr': return `${Math.round(v)} bpm`;
     case 'cadence': return `${Math.round(v)} rpm`;
     case 'alt': return `${Math.round(v)} m`;
     case 'temp': return `${v.toFixed(1)} °C`;
     case 'grade': return `${(v * 100).toFixed(1)}%`;
-    case 'distance': return `${(v / 1000).toFixed(2)} km`;
-    case 'distanceToFinish': return `${(v / 1000).toFixed(2)} km`;
+    case 'distance': return formatDistance(v, prefs);
+    case 'distanceToFinish': return formatDistance(v, prefs);
     case 'leanAngle': return `${((v * 180) / Math.PI).toFixed(1)}°`;
     default: return v.toFixed(2);
   }

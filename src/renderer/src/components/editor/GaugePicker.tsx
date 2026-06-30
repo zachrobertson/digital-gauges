@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import type { GaugeInstance } from '@shared/types';
 import { useProject } from '../../store/project';
 import { findPluginById } from '../../store/plugins';
 import { createNewGauge, gaugeDisplayLabel, isUnsupportedGaugeConfig } from '../../lib/gaugeFactory';
@@ -11,6 +12,8 @@ export function GaugePicker() {
   const project = useProject((s) => s.project);
   const selectedId = useProject((s) => s.selectedGaugeId);
   const addGauge = useProject((s) => s.addGauge);
+  const updateGauge = useProject((s) => s.updateGauge);
+  const removeGauge = useProject((s) => s.removeGauge);
   const selectGauge = useProject((s) => s.selectGauge);
   const { templates, applyTemplate, deleteTemplate, saveLayoutTemplate, refresh } = useGaugeTemplates();
   const { state: namePrompt, prompt, close: closeNamePrompt } = useNamePrompt();
@@ -34,6 +37,18 @@ export function GaugePicker() {
     });
     if (!name) return;
     await saveLayoutTemplate(name);
+  };
+
+  const onRenameGauge = async (gauge: GaugeInstance, currentLabel: string) => {
+    const name = await prompt({
+      title: 'Rename gauge',
+      label: 'Name',
+      defaultValue: gauge.name ?? currentLabel,
+      confirmLabel: 'Save',
+      dismissOnBackdropClick: false,
+    });
+    if (!name) return;
+    updateGauge(gauge.id, { name });
   };
 
   return (
@@ -74,11 +89,16 @@ export function GaugePicker() {
                 ? gaugeDisplayLabel(g, merged)
                 : (plugin?.name ?? g.pluginId);
               return (
-                <li key={g.id}>
+                <li key={g.id} className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => selectGauge(g.id)}
-                    className={`w-full text-left rounded-md border px-3 py-2 text-sm transition-colors ${
+                    onDoubleClick={(e) => {
+                      e.preventDefault();
+                      void onRenameGauge(g, label);
+                    }}
+                    title="Click to select · Double-click to rename"
+                    className={`flex-1 text-left rounded-md border px-3 py-2 text-sm transition-colors ${
                       selectedId === g.id
                         ? 'border-accent/60 bg-accent/10 text-white'
                         : unsupported
@@ -88,6 +108,14 @@ export function GaugePicker() {
                   >
                     {label}
                     {unsupported && <span className="block text-[10px] text-amber-200/60 mt-0.5">Unsupported — recreate</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost text-[10px] text-red-300 px-2"
+                    onClick={() => removeGauge(g.id)}
+                    title="Delete gauge"
+                  >
+                    ×
                   </button>
                 </li>
               );
@@ -107,11 +135,7 @@ export function GaugePicker() {
             Import…
           </button>
         </div>
-        {templates.length === 0 ? (
-          <p className="text-xs text-white/40">
-            Save a styled gauge or full layout to reuse across projects.
-          </p>
-        ) : (
+        {templates.length > 0 && (
           <ul className="flex flex-col gap-1">
             {templates.map((t) => (
               <li key={t.id} className="flex items-center gap-1">
@@ -122,20 +146,16 @@ export function GaugePicker() {
                   title={`Apply ${t.type} template`}
                 >
                   <span className="font-medium text-white/90">{t.name}</span>
-                  <span className="ml-2 text-white/40 uppercase text-[10px]">
-                    {t.source === 'builtin' ? 'built-in' : t.type}
-                  </span>
+                  <span className="ml-2 text-white/40 uppercase text-[10px]">{t.type}</span>
                 </button>
-                {t.source !== 'builtin' && (
-                  <button
-                    type="button"
-                    className="btn-ghost text-[10px] text-red-300 px-2"
-                    onClick={() => void deleteTemplate(t.id)}
-                    title="Delete template"
-                  >
-                    ×
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="btn-ghost text-[10px] text-red-300 px-2"
+                  onClick={() => void deleteTemplate(t.id)}
+                  title="Delete template"
+                >
+                  ×
+                </button>
               </li>
             ))}
           </ul>
@@ -149,6 +169,7 @@ export function GaugePicker() {
       placeholder={namePrompt.placeholder}
       defaultValue={namePrompt.defaultValue}
       confirmLabel={namePrompt.confirmLabel}
+      dismissOnBackdropClick={namePrompt.dismissOnBackdropClick}
       onConfirm={(value) => closeNamePrompt(value)}
       onCancel={() => closeNamePrompt(null)}
     />

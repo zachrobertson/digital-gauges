@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useProject } from '../../store/project';
 import type { useExport } from '../../lib/useExport';
-import { localMediaUrl } from '../../lib/paths';
 import { firstClipMedia, totalDurationMs } from '@shared/timeline';
 import {
   EXPORT_4K,
@@ -17,6 +17,11 @@ interface Props {
   exportApi: ReturnType<typeof useExport>;
 }
 
+function formatFpsDisplay(fps: number): string {
+  if (!Number.isFinite(fps) || fps <= 0) return '—';
+  const rounded = Math.round(fps * 1000) / 1000;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(3).replace(/\.?0+$/, '');
+}
 function formatClock(sec: number): string {
   const s = Math.max(0, Math.round(sec));
   const m = Math.floor(s / 60);
@@ -35,6 +40,8 @@ function bitsPerPixel(codec: ExportCodec, crf: number): number {
   return base * Math.pow(2, (28 - crf) / 6);
 }
 
+const CRF_MIN = 15;
+const CRF_MAX = 28;
 const RES_OPTIONS: { value: ExportResolution; label: string; dims: (w: number, h: number) => string }[] = [
   { value: 'source', label: 'Source', dims: (w, h) => `${w}×${h}` },
   { value: '1080p', label: '1080p', dims: () => `${EXPORT_1080P.width}×${EXPORT_1080P.height}` },
@@ -46,7 +53,7 @@ const CODEC_OPTIONS: { value: ExportCodec; label: string; sub: string }[] = [
   { value: 'prores4444', label: 'ProRes 4444', sub: 'Editing / alpha' },
 ];
 
-/** Export page — output summary + preview (left) and settings / live progress (right). */
+/** Export page — project summary (left) and settings / live progress (right). */
 export function ExportWorkspace({ exportApi }: Props) {
   const project = useProject((s) => s.project);
   const setExport = useProject((s) => s.setExport);
@@ -65,6 +72,11 @@ export function ExportWorkspace({ exportApi }: Props) {
 
   const out = resolveExportDimensions(video.width, video.height, ex.resolution ?? 'source');
   const upscale = isUpscaleTo4k(video.width, video.height, ex.resolution ?? 'source');
+  const sourceFps = video.fps;
+  const sourceFpsLabel = formatFpsDisplay(sourceFps);
+  const matchSourceFps = roundExportFps(sourceFps);
+  const isMatchSource = Math.abs(ex.fps - matchSourceFps) < 0.01;
+  const exportsAboveSource = ex.fps > sourceFps + 0.01;
   const durationSec = total / 1000;
   const frames = Math.round(durationSec * ex.fps);
   const bitrateMbps = (bitsPerPixel(ex.codec, ex.crf) * out.width * out.height * ex.fps) / 1_000_000;
@@ -78,12 +90,9 @@ export function ExportWorkspace({ exportApi }: Props) {
 
   return (
     <div className="flex h-full min-h-0">
-      {/* Left: thumbnail + summary */}
+      {/* Left: project summary */}
       <aside className="w-72 shrink-0 bg-bg-panel border-r border-white/[0.07] p-4 overflow-y-auto">
-        <div className="field-label mb-2">Source</div>
-        <ExportThumbnail path={video.path} />
-
-        <div className="field-label mt-4 mb-2">Project</div>
+        <div className="field-label mb-2">Project</div>
         <div className="flex flex-col gap-2.5">
           <SummaryRow label="Clips" value={String(project.clips.length)} />
           <SummaryRow label="Gauges" value={String(project.gauges.filter((g) => g.placed !== false).length)} />
@@ -118,36 +127,78 @@ export function ExportWorkspace({ exportApi }: Props) {
 
             <div className="flex gap-5">
               <div className="flex-1">
-                <div className="field-label mb-2">Quality {ex.codec === 'prores4444' ? '(N/A for ProRes)' : ''}</div>
-                <div className="flex items-center gap-2.5" style={{ opacity: ex.codec === 'prores4444' ? 0.4 : 1 }}>
-                  <input
-                    type="range" min={15} max={28} step={1} value={ex.crf}
-                    disabled={ex.codec === 'prores4444'}
-                    onChange={(e) => setExport({ crf: parseInt(e.target.value, 10) })}
-                    className="flex-1 accent-accent"
-                  />
-                  <span className="font-mono text-xs w-20 text-right">{ex.codec === 'prores4444' ? 'lossless' : `CRF ${ex.crf}`}</span>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <div className="field-label">Quality {ex.codec === 'prores4444' ? '(N/A for ProRes)' : ''}</div>
+                  {ex.codec !== 'prores4444' && <CrfHelpButton />}
                 </div>
+                {ex.codec === 'prores4444' ? (
+                  <input
+                    type="text"
+                    value="lossless"
+                    disabled
+                    className="w-24 bg-bg-elev rounded-lg px-2.5 py-2 text-xs font-mono border border-white/[0.07] opacity-40"
+                  />
+                ) : (
+                  <CrfInput value={ex.crf} onChange={(crf) => setExport({ crf })} />
+                )}
               </div>
               <div className="flex-1">
                 <div className="field-label mb-2">Frame rate</div>
                 <div className="flex gap-2 flex-wrap">
-                  {[24, 30, 60].map((f) => (
-                    <button key={f} type="button" className={`px-3.5 py-2 rounded-lg text-xs font-semibold border ${Math.round(ex.fps) === f ? 'bg-accent text-accent-ink border-transparent' : 'bg-bg-elev text-white border-white/[0.07]'}`} onClick={() => setExport({ fps: f })}>{f} fps</button>
-                  ))}
-                  <button type="button" className="px-3.5 py-2 rounded-lg text-xs text-textdim border border-dashed border-white/[0.16]" onClick={() => setExport({ fps: roundExportFps(video.fps) })}>Match source</button>
+                  {[24, 30, 60].map((f) => {
+                    const presetSelected = !isMatchSource && Math.abs(ex.fps - f) < 0.01;
+                    return (
+                      <button
+                        key={f}
+                        type="button"
+                        className={`px-3.5 py-2 rounded-lg text-xs font-semibold border ${
+                          presetSelected
+                            ? 'bg-accent text-accent-ink border-transparent'
+                            : 'bg-bg-elev text-textdim border-white/[0.07]'
+                        }`}
+                        onClick={() => setExport({ fps: f })}
+                      >
+                        {f} fps
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    className={`px-3.5 py-2 rounded-lg text-xs border border-dashed ${
+                      isMatchSource
+                        ? 'bg-accent text-accent-ink border-transparent'
+                        : 'text-textdim border-white/[0.16]'
+                    }`}
+                    onClick={() => setExport({ fps: matchSourceFps })}
+                  >
+                    Match source ({sourceFpsLabel} fps)
+                  </button>
                 </div>
+                <p className="text-[11px] text-textfaint mt-1.5">
+                  Source frame rate: <span className="font-mono text-textdim">{sourceFpsLabel} fps</span>
+                </p>
+                {exportsAboveSource && (
+                  <p className="text-[11px] text-warn mt-1">
+                    Export frame rate is above source — FFmpeg will interpolate frames to reach {formatFpsDisplay(ex.fps)} fps.
+                  </p>
+                )}
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
-                checked={ex.includeAudio !== false}
-                onChange={(e) => setExport({ includeAudio: e.target.checked })}
-              />
-              Include audio from source clips
-            </label>
+            <div>
+              <div className="field-label mb-2">Audio</div>
+              <button
+                type="button"
+                className={`px-3.5 py-2 rounded-lg text-xs font-semibold border ${
+                  ex.includeAudio !== false
+                    ? 'bg-accent text-accent-ink border-transparent'
+                    : 'bg-bg-elev text-textdim border-white/[0.07]'
+                }`}
+                onClick={() => setExport({ includeAudio: ex.includeAudio === false })}
+              >
+                Export audio
+              </button>
+            </div>
 
             {/* Estimates + start */}
             <div className="rounded-xl border border-white/[0.07] bg-bg-panel p-4 flex items-center gap-4">
@@ -195,19 +246,114 @@ export function ExportWorkspace({ exportApi }: Props) {
   );
 }
 
-/** Static first-frame thumbnail — no playback controls or preview build. */
-function ExportThumbnail({ path }: { path: string }) {
+function CrfHelpButton() {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
   return (
-    <div className="aspect-video rounded-[10px] overflow-hidden border border-white/[0.16] bg-black">
-      <video
-        src={localMediaUrl(path)}
-        className="w-full h-full object-contain pointer-events-none"
-        muted
-        playsInline
-        preload="metadata"
-        aria-hidden
-        onLoadedData={(e) => { e.currentTarget.currentTime = 0.1; }}
-      />
+    <>
+      <button
+        type="button"
+        className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-white/20 text-[10px] leading-none text-textfaint hover:text-white hover:border-white/40"
+        aria-label="CRF quality help"
+        onClick={() => setOpen(true)}
+      >
+        ?
+      </button>
+      {open && createPortal(
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setOpen(false)}
+          onPointerDown={(e) => e.stopPropagation()}
+          role="presentation"
+        >
+          <div
+            className="panel w-full max-w-xs p-4 flex flex-col gap-3 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="crf-help-title"
+          >
+            <h3 id="crf-help-title" className="text-sm font-semibold">CRF quality</h3>
+            <div className="text-xs text-textdim leading-relaxed flex flex-col gap-2">
+              <p>CRF controls compression quality for H.264 and HEVC exports. Lower values mean higher quality and larger files.</p>
+              <p><span className="text-white/80">Minimum ({CRF_MIN}):</span> highest quality, largest file size.</p>
+              <p><span className="text-white/80">Maximum ({CRF_MAX}):</span> lowest quality, smallest file size.</p>
+            </div>
+            <div className="flex justify-end">
+              <button type="button" className="btn-ghost text-xs" onClick={() => setOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+function CrfInput({ value, onChange }: { value: number; onChange: (crf: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const trimmed = draft.trim();
+  const parsed = trimmed === '' ? NaN : Number(trimmed);
+  const hasNumeric = trimmed !== '' && Number.isFinite(parsed);
+  let rangeError: 'min' | 'max' | null = null;
+  if (hasNumeric) {
+    if (parsed < CRF_MIN) rangeError = 'min';
+    else if (parsed > CRF_MAX) rangeError = 'max';
+  }
+
+  const handleChange = (raw: string) => {
+    setDraft(raw);
+    const next = raw.trim();
+    if (next === '') return;
+    const n = Number(next);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) return;
+    if (n >= CRF_MIN && n <= CRF_MAX) onChange(n);
+  };
+
+  const handleBlur = () => {
+    if (rangeError || trimmed === '' || !Number.isInteger(parsed)) {
+      setDraft(String(value));
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={draft}
+          onChange={(e) => handleChange(e.target.value)}
+          onBlur={handleBlur}
+          className={`w-24 bg-bg-elev rounded-lg px-2.5 py-2 text-xs font-mono border ${rangeError ? 'border-red-400/60' : 'border-white/[0.07]'}`}
+          aria-invalid={rangeError != null}
+          aria-describedby={rangeError ? 'crf-range-error' : undefined}
+        />
+        <span className="text-xs text-textfaint">CRF</span>
+      </div>
+      {rangeError === 'max' && (
+        <p id="crf-range-error" className="text-[11px] text-red-300 mt-1">Maximum value is {CRF_MAX}.</p>
+      )}
+      {rangeError === 'min' && (
+        <p id="crf-range-error" className="text-[11px] text-red-300 mt-1">Minimum value is {CRF_MIN}.</p>
+      )}
     </div>
   );
 }

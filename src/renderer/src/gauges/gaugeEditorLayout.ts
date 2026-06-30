@@ -1,5 +1,6 @@
 /** Layout types and geometry for the interactive gauge editor (480×270 reference frame). */
 import type { GaugeElement, TextColorChoice, TextIcon, TextSlot, XY } from '@shared/types/gaugeElement';
+import { DEFAULT_FONT_FAMILY } from '../lib/fonts';
 import { drawTextIcon, textIconWidth } from './textIcons';
 import { defaultGaugeElements, normalizeGaugeElements } from '../lib/gaugeElementFactory';
 import type { FrameShape } from './frameStyle';
@@ -75,7 +76,7 @@ export function defaultBarConfig(gaugeRect: LayoutRect = DEFAULT_GAUGE_RECT): Ba
       w: Math.max(MIN_BAR_LENGTH, gaugeRect.w - pad * 2),
       h: thickness,
     },
-    rounded: true,
+    rounded: false,
     color: 'default',
   };
 }
@@ -304,7 +305,7 @@ export function drawTextSlotsInLayoutSpace(
   slots: { label?: TextSlot; value: TextSlot; unit?: TextSlot },
   options: TextSlotDrawOptions,
 ): void {
-  const family = options.fontFamily ?? 'Inter';
+  const family = options.fontFamily ?? DEFAULT_FONT_FAMILY;
   const fontScale = options.fontScale ?? 1;
   const roles: TextRole[] = ['label', 'value', 'unit'];
   for (const role of roles) {
@@ -334,7 +335,7 @@ export function drawStaticTextInLayoutSpace(
   fontSize: number,
   color: TextColorChoice,
   accentColor: string,
-  fontFamily = 'Inter',
+  fontFamily = DEFAULT_FONT_FAMILY,
   fontScale = 1,
 ): void {
   const size = fontSize * fontScale;

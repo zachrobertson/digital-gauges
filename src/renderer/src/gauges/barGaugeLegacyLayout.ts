@@ -3,6 +3,7 @@
  * The composite data gauge uses `GaugeLayoutConfig.elements` instead.
  */
 import type { BarConfig, LayoutRect, TextElement, TextRole, XY } from './gaugeEditorLayout';
+import { DEFAULT_FONT_FAMILY } from '../lib/fonts';
 import {
   DEFAULT_GAUGE_RECT,
   defaultBarConfig,
@@ -133,7 +134,7 @@ export function drawLegacyLayoutTextInLayoutSpace(
     skipEmpty?: boolean;
   },
 ): void {
-  const family = options.fontFamily ?? 'Inter';
+  const family = options.fontFamily ?? DEFAULT_FONT_FAMILY;
   const fontScale = options.fontScale ?? 1;
   const roles: TextRole[] = ['label', 'value', 'unit'];
   for (const role of roles) {

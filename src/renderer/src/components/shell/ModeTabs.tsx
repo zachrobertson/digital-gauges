@@ -7,13 +7,6 @@ const TABS: { mode: WorkspaceMode; label: string }[] = [
   { mode: 'export', label: 'Export' },
 ];
 
-export const MODE_HINTS: Record<WorkspaceMode, string> = {
-  edit: 'Trim, split & arrange clips',
-  sync: 'Align telemetry to footage',
-  gauges: 'Design overlays',
-  export: 'Render the final video',
-};
-
 /** Workspace mode navigation — pill group, one focused workspace at a time. */
 export function ModeTabs() {
   const mode = useProject((s) => s.workspaceMode);

@@ -19,6 +19,8 @@ interface Options {
   enabled?: boolean;
   selectedElementIds: string[];
   onSelectElements: (ids: string[]) => void;
+  showFrameBounds?: boolean;
+  onShowFrameBoundsChange?: (visible: boolean) => void;
   layout: GaugeLayoutConfig;
   onLayoutChange: (layout: GaugeLayoutConfig) => void;
   gridSize?: number;
@@ -61,6 +63,8 @@ export function useElementEditorShortcuts({
   enabled = true,
   selectedElementIds,
   onSelectElements,
+  showFrameBounds = true,
+  onShowFrameBoundsChange,
   layout,
   onLayoutChange,
   gridSize = 12,
@@ -79,18 +83,28 @@ export function useElementEditorShortcuts({
         return;
       }
 
+      if (e.key === 'Escape') {
+        if (selectedElementIds.length > 0) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          onSelectElements([]);
+          return;
+        }
+        if (showFrameBounds && onShowFrameBoundsChange) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          onShowFrameBoundsChange(false);
+          return;
+        }
+        return;
+      }
+
       if (containerRef?.current && !containerRef.current.contains(document.activeElement)) {
         const tag = document.activeElement?.tagName;
         if (tag !== 'BODY' && tag !== 'HTML') return;
       }
 
       const mod = e.metaKey || e.ctrlKey;
-
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onSelectElements([]);
-        return;
-      }
 
       if (mod && e.key.toLowerCase() === 'a') {
         e.preventDefault();
@@ -158,8 +172,9 @@ export function useElementEditorShortcuts({
       });
     };
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    // Capture so Escape clears element selection before App's bubble handler deselects the gauge.
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [
     containerRef,
     enabled,
@@ -167,6 +182,8 @@ export function useElementEditorShortcuts({
     layout,
     onLayoutChange,
     onSelectElements,
+    onShowFrameBoundsChange,
     selectedElementIds,
+    showFrameBounds,
   ]);
 }
