@@ -1,11 +1,17 @@
 name: CI
 
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:
@@ -41,7 +47,6 @@ jobs:
   build:
     name: Build (${{ matrix.platform }})
     needs: validate
-    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
@@ -79,6 +84,7 @@ jobs:
         run: npm run ${{ matrix.build-script }}
 
       - name: Upload installer artifact
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'pull_request' && github.base_ref == 'main')
         uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.platform }}
