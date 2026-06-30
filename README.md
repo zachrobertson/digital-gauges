@@ -1,26 +1,42 @@
 # Digital Gauges
 
-Cross-platform desktop app for adding live, frame-accurate data gauges
-(speed, power, heart rate, cadence, GPS map, altitude, lap timer) from
-bike-computer telemetry to ride videos — then burning the overlay into a
-finished MP4.
+Cross-platform desktop app for adding frame-accurate data overlays —
+speed, power, heart rate, GPS, cadence, temperature, altitude, and custom
+fields — from FIT data files to action-camera video, then burning the
+result into a finished MP4.
+
+Import footage from any action camera and a FIT file — no manufacturer
+apps, telemetry extraction, or traditional video editor required.
+
+![Digital Gauges editor with telemetry overlays](docs/images/app-screenshot.png)
 
 You bring two things:
 
-- **A ride video** from any action camera (GoPro, Insta360, DJI, Sony,
+- **Action-camera video** from any camera (GoPro, Insta360, DJI, Sony,
   etc.) — used for picture and timing only.
-- **A FIT file** from a **Garmin / Wahoo bike computer** — the source of
-  all gauge data (speed, power, heart rate, cadence, GPS, altitude, …).
+- **A FIT data file** — the source of all gauge data (speed, power, heart
+  rate, cadence, GPS, altitude, temperature, …).
 
 No camera-specific software or telemetry extraction is required.
 
+## Brand & terminology
+
+- **Digital Gauges** is the full product name (window title, menus, export
+  dialogs, README heading). **DG** is the short acronym for tight spaces
+  (icon, favicon).
+- Telemetry abbreviations: **HR** (heart rate), **FTP** (functional
+  threshold power, gauge zones only), **FIT** (always "FIT file" or "FIT
+  data file"), plus **GPS**, **W**, **km/h**, **mph** as-is.
+- Marketing copy stays sport-generic: "action-camera video/footage" and
+  "FIT telemetry/data" rather than ride- or device-specific terms.
+
 ## Tech Stack
 
-- Electron 31 + electron-vite (Vite renderer, Node main)
-- React 18 + TypeScript + Tailwind CSS
+- Electron 42 + electron-vite (Vite renderer, Node main)
+- React 19 + TypeScript + Tailwind CSS
 - Zustand for state
 - `fit-file-parser` for FIT
-- `ffmpeg-static` + `fluent-ffmpeg` for export
+- `ffmpeg-static` + `ffprobe-static` for probe, preview, and export
 
 ## Development
 
@@ -59,3 +75,9 @@ src/
 
 See `docs/writing-gauges.md` for the user-gauge plugin format and
 `docs/gauge-templates.md` for saved gauge templates and example presets.
+
+## License
+
+Source code is [MIT](LICENSE). Distributed application builds may include
+third-party components with separate licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

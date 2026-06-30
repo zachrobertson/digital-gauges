@@ -7,6 +7,7 @@ import type { GpsRouteScope } from '../gauges/gpsMiniMap';
 import { isMapGaugeConfig } from '../gauges/dataGauge';
 import { ensureFontsLoaded } from './fonts';
 import { withGaugeBoundsClip } from '../gauges/common';
+import { projectNameFromPath } from './projectSession';
 import type { GaugePlugin, Project } from '@shared/types';
 
 /**
@@ -60,11 +61,11 @@ export function useExport() {
   }, []);
 
   const startExport = useCallback(async () => {
-    const { project: current } = useProject.getState();
+    const { project: current, projectFilePath } = useProject.getState();
     if (current.clips.length === 0) return;
     if (exporting) return;
 
-    const defaultName = (current.name || 'export') + '.mp4';
+    const defaultName = (projectFilePath ? projectNameFromPath(projectFilePath) : 'export') + '.mp4';
     const path = await window.api.pickExportPath(defaultName);
     if (!path) return;
 

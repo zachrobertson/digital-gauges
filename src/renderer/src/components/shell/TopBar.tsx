@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useProject, type WorkspaceMode } from '../../store/project';
 import {
   DEFAULT_PROJECT_NAME,
-  isDefaultProjectName,
   projectHasSessionContent,
   projectNameFromPath,
 } from '../../lib/projectSession';
@@ -19,27 +18,25 @@ export function TopBar() {
   const projectFilePath = useProject((s) => s.projectFilePath);
   const setProject = useProject((s) => s.setProject);
   const setProjectFilePath = useProject((s) => s.setProjectFilePath);
-  const setProjectName = useProject((s) => s.setProjectName);
   const resetProject = useProject((s) => s.resetProject);
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const [saveNamePromptOpen, setSaveNamePromptOpen] = useState(false);
 
+  // The project name is always derived from the .dgproj filename; an unsaved
+  // project (no file path) falls back to the default label.
   const displayName = projectFilePath
     ? projectNameFromPath(projectFilePath)
-    : project.name;
+    : DEFAULT_PROJECT_NAME;
 
   function defaultSaveName(): string {
     if (projectFilePath) return projectNameFromPath(projectFilePath);
-    if (!isDefaultProjectName(project.name)) return project.name;
     return DEFAULT_PROJECT_NAME;
   }
 
   async function saveProjectToPath(path: string) {
     const { project: current } = useProject.getState();
-    const name = projectNameFromPath(path);
-    const updated = { ...current, name, updatedAt: new Date().toISOString() };
+    const updated = { ...current, updatedAt: new Date().toISOString() };
     await window.api.saveProject(path, updated);
-    setProjectName(name);
     setProjectFilePath(path);
   }
 
@@ -63,7 +60,7 @@ export function TopBar() {
     const path = await window.api.pickProjectFile();
     if (!path) return;
     const loaded = await window.api.loadProject(path);
-    setProject({ ...loaded, name: projectNameFromPath(path) });
+    setProject(loaded);
     setProjectFilePath(path);
   }
 

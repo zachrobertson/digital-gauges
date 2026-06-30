@@ -13,9 +13,9 @@ export function useProjectAutosave() {
 
   useEffect(() => {
     const flush = () => {
-      const { project } = useProject.getState();
+      const { project, projectFilePath } = useProject.getState();
       if (!projectHasSessionContent(project)) return;
-      void window.api.saveDraft(project);
+      void window.api.saveDraft(project, projectFilePath);
     };
 
     const schedule = () => {

@@ -55,7 +55,7 @@ export default plugin;
 | `defaultRect`     | yes      | Default position/size in relative units (0–1). |
 | `defaultConfig`   | yes      | Default config object. |
 | `schema`          | yes      | JSON Schema (Draft-7 subset) describing the editable config. The app renders a generic form from it. |
-| `renderToCanvas`  | yes      | Pure canvas render — called every frame at preview *and* at export. |
+| `renderToCanvas`  | yes      | Pure canvas render — called every frame at preview *and* at export. Receives a fifth `dpr` argument (device pixel ratio); you can ignore it for simple gauges. |
 
 ## Available telemetry fields
 
@@ -71,6 +71,7 @@ passed to your `renderToCanvas`. Available keys:
 - `temp` (°C)
 - `grade` (fraction, 0.05 = 5%)
 - `distance` (m)
+- `distanceToFinish` (m) — derived when a finish-line distance is set in Sync
 - `leanAngle` (rad)
 - `accelX`, `accelY`, `accelZ` (m/s²)
 - `gyroX`, `gyroY`, `gyroZ` (rad/s)
@@ -83,6 +84,7 @@ The config panel renders inputs for the following property shapes:
 
 - `type: 'string'` → text input
 - `type: 'string', format: 'color'` → color picker
+- `type: 'string', format: 'font'` → font picker
 - `type: 'string', enum: [...]` → select dropdown
 - `type: 'number' | 'integer'` with `minimum` / `maximum` / `step` → range slider
 - `type: 'boolean'` → toggle

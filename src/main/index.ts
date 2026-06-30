@@ -47,6 +47,10 @@ function createWindow(): void {
     minHeight: 700,
     show: false,
     backgroundColor: '#0b0d10',
+    // Window/taskbar icon. On Windows/macOS the packaged build uses the
+    // executable/bundle icon (set by electron-builder); this primarily covers
+    // dev and Linux, where the runtime icon is read from disk.
+    icon: join(__dirname, '../../build/icon.png'),
     autoHideMenuBar: true,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {

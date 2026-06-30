@@ -37,7 +37,6 @@ import {
   rechainedSharedFitSyncFrom,
   videoUtcMs,
 } from '@shared/sync';
-import { DEFAULT_PROJECT_NAME } from '../lib/projectSession';
 
 const newId = () => crypto.randomUUID();
 
@@ -48,7 +47,6 @@ function emptyProject(): Project {
   return {
     version: 5,
     id: newId(),
-    name: DEFAULT_PROJECT_NAME,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     clips: [],
@@ -163,7 +161,6 @@ interface ProjectState {
   setBusyMessage(message: string | null): void;
   setProject(p: Project): void;
   setProjectFilePath(path: string | null): void;
-  setProjectName(name: string): void;
   resetProject(): void;
 
   addClip(media: MediaSource): void;
@@ -264,10 +261,6 @@ export const useProject = create<ProjectState>((set) => ({
   },
 
   setProjectFilePath: (path) => set({ projectFilePath: path }),
-
-  setProjectName: (name) => set((s) => ({
-    project: { ...s.project, name, updatedAt: new Date().toISOString() },
-  })),
 
   resetProject: () => set({
     project: emptyProject(),

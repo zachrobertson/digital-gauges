@@ -38,8 +38,8 @@ export interface DigitalGaugesApi {
   loadProject(path: string): Promise<Project>;
 
   getRecoveryInfo(): Promise<RecoveryInfo>;
-  saveDraft(project: Project): Promise<void>;
-  loadDraft(): Promise<Project | null>;
+  saveDraft(project: Project, filePath: string | null): Promise<void>;
+  loadDraft(): Promise<DraftPayload | null>;
   clearDraft(): Promise<void>;
 
   getAppSettings(): Promise<AppSettings>;
@@ -118,9 +118,20 @@ export interface ExportResult {
   error?: string;
 }
 
+/** Autosaved session draft plus the .dgproj path it was associated with (if any). */
+export interface DraftPayload {
+  /** Source project file the draft belongs to, or null for a never-saved project. */
+  filePath: string | null;
+  project: Project;
+}
+
 export interface RecoveryInfo {
   hasDraft: boolean;
   draftUpdatedAt: string | null;
+  /** The .dgproj path the autosaved draft was associated with, if any. */
+  draftFilePath: string | null;
+  /** Whether `draftFilePath` still exists on disk. */
+  draftFileExists: boolean;
   lastProjectPath: string | null;
   lastProjectExists: boolean;
 }
