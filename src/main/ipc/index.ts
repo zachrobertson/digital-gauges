@@ -14,13 +14,13 @@ import { buildPreviewVideo, isPreviewAbortError } from '../preview/concat';
 import {
   listLoadedPlugins,
   openPluginsFolder,
-  installExampleGauge,
 } from '../plugins/loader';
 import {
   clearDraft,
   getRecoveryInfo,
   loadDraft,
   normalizeProject,
+  readSettings,
   saveDraft,
   writeSettings,
 } from '../project-persistence';
@@ -33,6 +33,7 @@ import {
   saveTemplate,
 } from '../template-persistence';
 import type {
+  AppSettings,
   ExportProgress,
   ExportResult,
   GaugeTemplateFile,
@@ -141,6 +142,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('session:loadDraft', () => loadDraft());
   ipcMain.handle('session:clearDraft', () => clearDraft());
 
+  ipcMain.handle('settings:get', () => readSettings());
+  ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => writeSettings(patch));
+
   ipcMain.handle('export:start', async (_e, project: Project) => {
     const win = getWindow();
     const startedAt = Date.now();
@@ -206,7 +210,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       win.webContents.send('preview:progress', progress);
     };
     try {
-      const path = await buildPreviewVideo(segments, { signal: controller.signal, onProgress });
+      const { previewResolution } = await readSettings();
+      const path = await buildPreviewVideo(segments, {
+        previewResolution,
+        signal: controller.signal,
+        onProgress,
+      });
       return { path };
     } catch (err) {
       // A superseded/cancelled build is expected, not a failure — report it as
@@ -225,7 +234,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('plugins:list', () => listLoadedPlugins());
   ipcMain.handle('plugins:openFolder', () => openPluginsFolder());
-  ipcMain.handle('plugins:installExample', () => installExampleGauge());
 
   ipcMain.handle('templates:list', () => listTemplates());
   ipcMain.handle('templates:save', async (_e, template: GaugeTemplateFile) => saveTemplate(template));

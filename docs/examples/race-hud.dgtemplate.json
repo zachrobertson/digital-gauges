@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "id": "example-race-hud",
+  "name": "Race HUD",
+  "type": "single",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "gauge": {
+    "config": {
+      "panelOpacity": 0.65,
+      "panelBg": "#0b0d10",
+      "panelBorder": "transparent",
+      "fontScale": 1,
+      "fontFamily": "Inter",
+      "frameShape": "rectangle",
+      "frameCornerRadius": 0,
+      "displayStyle": "bar",
+      "textLayout": "standard",
+      "showScaleLabels": false,
+      "showArcTicks": true,
+      "arcTickCount": 8,
+      "trailColor": "#3ddc97",
+      "cursorColor": "#ffffff",
+      "routeScope": "video",
+      "units": "kmh",
+      "maxSpeedKmh": 80,
+      "scaleMax": 80,
+      "color": "#3ddc97",
+      "field": "speed",
+      "layout": {
+        "gaugeRect": { "x": 40, "y": 20, "w": 400, "h": 230 },
+        "elements": [
+          {
+            "id": "f1a2b3c4-d5e6-4789-a012-3456789abcde",
+            "visible": true,
+            "kind": "map",
+            "rect": { "x": 49.6, "y": 38, "w": 100.8, "h": 74 },
+            "routeScope": "video",
+            "trailColor": "#3ddc97",
+            "cursorColor": "#ffffff",
+            "showCourseStart": true,
+            "showCourseFinish": true,
+            "startMarkerStyle": "line",
+            "finishMarkerStyle": "line",
+            "startMarkerColor": "#22c55e",
+            "finishMarkerColor": "#111111",
+            "markerLength": 56,
+            "markerWidth": 30,
+            "groupId": "race-hud-map"
+          },
+          {
+            "id": "a9b8c7d6-e5f4-4321-b098-76543210fedc",
+            "visible": true,
+            "kind": "bar",
+            "field": "speed",
+            "rect": { "x": 48, "y": 205.6, "w": 164, "h": 6.4 },
+            "rounded": true,
+            "color": "default",
+            "groupId": "race-hud-speed"
+          },
+          {
+            "id": "12345678-90ab-cdef-1234-567890abcdef",
+            "visible": true,
+            "kind": "arc",
+            "field": "power",
+            "center": { "x": 350, "y": 185 },
+            "radius": 42,
+            "startDeg": 30,
+            "endDeg": 330,
+            "color": "default",
+            "showScaleLabels": true,
+            "showArcTicks": true,
+            "arcTickCount": 8,
+            "groupId": "race-hud-power"
+          }
+        ]
+      }
+    },
+    "rect": { "x": 0.04, "y": 0.05, "w": 0.92, "h": 0.9 }
+  }
+}

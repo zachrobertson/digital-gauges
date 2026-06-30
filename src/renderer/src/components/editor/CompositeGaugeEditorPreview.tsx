@@ -69,8 +69,8 @@ const HANDLE_RADIUS = 4;
 const HANDLE_HIT_RADIUS = 8;
 const BOUNDS_GUIDE_COLOR = PANEL_GUIDE_COLOR;
 
-function clampCornerRadius(rect: LayoutRect, rx: number): number {
-  return Math.min(Math.max(0, rx), rect.w / 2, rect.h / 2);
+function clampCornerRadius(_rect: LayoutRect, _rx: number): number {
+  return 0;
 }
 
 function cornerMarkerPoints(rect: LayoutRect, rx: number): XY[] {
@@ -442,6 +442,9 @@ interface Props {
   showGrid?: boolean;
   snapEnabled?: boolean;
   gridSize?: number;
+  /** Panel frame outline + resize handles in the stage preview. */
+  showFrameBounds?: boolean;
+  onShowFrameBoundsChange?: (visible: boolean) => void;
   /** Fill parent container; hide zoom chrome (video layout overlay). */
   embedded?: boolean;
 }
@@ -562,7 +565,7 @@ function GaugeElementsCanvas({
       ref={canvasRef}
       width={LAYOUT_REF_W}
       height={LAYOUT_REF_H}
-      style={{ width: LAYOUT_REF_W, height: LAYOUT_REF_H, display: 'block' }}
+      style={{ width: LAYOUT_REF_W, height: LAYOUT_REF_H, display: 'block', pointerEvents: 'none' }}
     />
   );
 }
@@ -582,6 +585,7 @@ export function CompositeGaugeEditorPreview({
   showGrid = true,
   snapEnabled = true,
   gridSize = 12,
+  showFrameBounds = true,
   embedded = false,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -898,6 +902,7 @@ export function CompositeGaugeEditorPreview({
   const panelEllipse = frameShape === 'ellipse' ? panelEllipseGeometry(gaugeRect) : null;
   const multiSelect = selectedElementIds.length > 1;
   const hasElementSelection = selectedElementIds.length > 0;
+  const showFrameGuides = showFrameBounds && !hasElementSelection;
 
   const onCanvasPointerDown = (e: React.PointerEvent) => {
     beginDrag((origin) => ({
@@ -909,10 +914,9 @@ export function CompositeGaugeEditorPreview({
     setMarqueeRect(marqueeRectRef.current);
   };
 
-  const onElementSelect = (id: string, shiftKey: boolean, altKey: boolean) => {
+  const onElementSelect = (id: string, shiftKey: boolean) => {
     onSelectElements?.(selectElement(displayLayout.elements, id, {
       shiftKey,
-      deepEdit: altKey,
       current: selectedElementIds,
     }));
   };
@@ -976,7 +980,14 @@ export function CompositeGaugeEditorPreview({
                   </foreignObject>
                 </g>
 
-                <FrameBorderDrag gaugeRect={gaugeRect} panelRadius={pr} frameShape={frameShape} hidden={embedded || hasElementSelection} />
+                <FrameBorderDrag gaugeRect={gaugeRect} panelRadius={pr} frameShape={frameShape} hidden={embedded || !showFrameGuides} />
+
+                <FrameResizeHandles
+                  gaugeRect={gaugeRect}
+                  frameShape={frameShape}
+                  beginDrag={beginDrag}
+                  hidden={embedded || !showFrameGuides}
+                />
 
                 {[...displayLayout.elements].reverse().filter((e) => e.visible).map((el) => (
                   <ElementHitArea
@@ -986,7 +997,7 @@ export function CompositeGaugeEditorPreview({
                     multiSelected={multiSelect}
                     selectedElementIds={selectedElementIds}
                     elements={displayLayout.elements}
-                    onSelect={(shiftKey, altKey) => onElementSelect(el.id, shiftKey, altKey)}
+                    onSelect={(shiftKey) => onElementSelect(el.id, shiftKey)}
                     beginDrag={beginDrag}
                   />
                 ))}
@@ -1017,13 +1028,6 @@ export function CompositeGaugeEditorPreview({
                     pointerEvents="none"
                   />
                 )}
-
-                <FrameResizeHandles
-                  gaugeRect={gaugeRect}
-                  frameShape={frameShape}
-                  beginDrag={beginDrag}
-                  hidden={embedded || hasElementSelection}
-                />
               </g>
             </svg>
   );
@@ -1542,7 +1546,7 @@ function ElementHitArea({
   multiSelected: boolean;
   selectedElementIds: string[];
   elements: GaugeElement[];
-  onSelect: (shiftKey: boolean, altKey: boolean) => void;
+  onSelect: (shiftKey: boolean) => void;
   beginDrag: (build: (origin: XY) => DragKind) => (e: React.PointerEvent) => void;
 }) {
   if (isElementLocked(element)) return null;
@@ -1550,11 +1554,11 @@ function ElementHitArea({
   const onPointerDown = (e: React.PointerEvent, textSlot?: 'value' | 'unit') => {
     e.stopPropagation();
     if (e.shiftKey) {
-      onSelect(e.shiftKey, e.altKey);
+      onSelect(e.shiftKey);
       return;
     }
     if (!selected) {
-      onSelect(false, e.altKey);
+      onSelect(false);
     }
     if (multiSelected && selected) {
       beginDrag((o) => buildSelectionMoveDrag(selectedElementIds, elements, o))(e);

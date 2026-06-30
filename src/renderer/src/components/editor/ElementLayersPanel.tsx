@@ -42,11 +42,12 @@ export function ElementLayersPanel({
   };
 
   const onRowClick = (id: string, e: React.MouseEvent) => {
-    onSelectElements(selectElement(layout.elements, id, {
-      shiftKey: e.shiftKey || e.ctrlKey || e.metaKey,
-      deepEdit: e.altKey,
-      current: selectedElementIds,
-    }));
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    if (additive) {
+      onSelectElements(selectElement(layout.elements, id, { shiftKey: true, current: selectedElementIds }));
+    } else {
+      onSelectElements(selectOne(id));
+    }
   };
 
   const deleteLayer = (id: string) => {

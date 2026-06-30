@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 interface Props {
   open: boolean;
@@ -7,6 +8,7 @@ interface Props {
   placeholder?: string;
   defaultValue?: string;
   confirmLabel?: string;
+  dismissOnBackdropClick?: boolean;
   onConfirm: (value: string) => void;
   onCancel: () => void;
 }
@@ -18,6 +20,7 @@ export function NamePromptDialog({
   placeholder,
   defaultValue = '',
   confirmLabel = 'Save',
+  dismissOnBackdropClick = true,
   onConfirm,
   onCancel,
 }: Props) {
@@ -27,8 +30,13 @@ export function NamePromptDialog({
   useEffect(() => {
     if (open) {
       setValue(defaultValue);
-      const id = requestAnimationFrame(() => inputRef.current?.focus());
-      return () => cancelAnimationFrame(id);
+      const id = window.setTimeout(() => {
+        const input = inputRef.current;
+        if (!input) return;
+        input.focus();
+        input.select();
+      }, 0);
+      return () => window.clearTimeout(id);
     }
   }, [open, defaultValue]);
 
@@ -40,15 +48,17 @@ export function NamePromptDialog({
     onConfirm(trimmed);
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={onCancel}
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60"
+      onClick={dismissOnBackdropClick ? onCancel : undefined}
+      onPointerDown={(e) => e.stopPropagation()}
       role="presentation"
     >
       <div
         className="panel w-full max-w-sm p-5 flex flex-col gap-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="name-prompt-title"
@@ -57,11 +67,13 @@ export function NamePromptDialog({
           {title}
         </h2>
         <div className="flex flex-col gap-1.5">
-          <label className="field-label">{label}</label>
+          <label className="field-label" htmlFor="name-prompt-input">{label}</label>
           <input
+            id="name-prompt-input"
             ref={inputRef}
             type="text"
-            className="bg-white/5 rounded-md px-3 py-2 text-sm border border-white/10"
+            autoFocus
+            className="bg-white/5 rounded-md px-3 py-2 text-sm border border-white/10 text-white caret-white"
             placeholder={placeholder}
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -85,6 +97,7 @@ export function NamePromptDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

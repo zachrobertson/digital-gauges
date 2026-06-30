@@ -203,7 +203,7 @@ function drawGaugeError(
   ctx.fillStyle = 'rgba(239,68,68,0.85)';
   ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   ctx.fillStyle = '#fff';
-  ctx.font = '500 12px Inter, sans-serif';
+  ctx.font = '500 12px JetBrains Mono, ui-monospace, monospace';
   ctx.fillText(`${name}: ${msg.slice(0, 80)}`, rect.x + 8, rect.y + 16);
   ctx.restore();
 }

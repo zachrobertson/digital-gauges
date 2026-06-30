@@ -20,12 +20,14 @@ import {
   clipOutMs,
   clipStartGlobalMs,
   globalTimeFromClipLocal,
+  isPreviewStale,
   projectDurationMs,
   resolveClipOverlaps,
   timelineEndMs,
 } from '@shared/timeline';
 import { frameAtGlobalTime } from '../lib/telemetry';
 import {
+  applySharedFitAnchorToAllClips,
   computeOffsetFromAnchor,
   computeTimestampOverlayOffset,
   defaultFitTrackSync,
@@ -35,6 +37,7 @@ import {
   rechainedSharedFitSyncFrom,
   videoUtcMs,
 } from '@shared/sync';
+import { DEFAULT_PROJECT_NAME } from '../lib/projectSession';
 
 const newId = () => crypto.randomUUID();
 
@@ -45,7 +48,7 @@ function emptyProject(): Project {
   return {
     version: 5,
     id: newId(),
-    name: 'Untitled Ride',
+    name: DEFAULT_PROJECT_NAME,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     clips: [],
@@ -160,6 +163,7 @@ interface ProjectState {
   setBusyMessage(message: string | null): void;
   setProject(p: Project): void;
   setProjectFilePath(path: string | null): void;
+  setProjectName(name: string): void;
   resetProject(): void;
 
   addClip(media: MediaSource): void;
@@ -260,6 +264,10 @@ export const useProject = create<ProjectState>((set) => ({
   },
 
   setProjectFilePath: (path) => set({ projectFilePath: path }),
+
+  setProjectName: (name) => set((s) => ({
+    project: { ...s.project, name, updatedAt: new Date().toISOString() },
+  })),
 
   resetProject: () => set({
     project: emptyProject(),
@@ -378,6 +386,21 @@ export const useProject = create<ProjectState>((set) => ({
       startGlobalMs = nextStart;
     }
 
+    const currentStartGlobal = typeof target.startGlobalMs === 'number' && Number.isFinite(target.startGlobalMs)
+      ? target.startGlobalMs
+      : oldStart;
+    const wouldChange = nextIn !== clipInMs(target)
+      || nextOut !== clipOutMs(target)
+      || startGlobalMs !== currentStartGlobal;
+    if (!wouldChange) {
+      const previewStale = isPreviewStale(s.lastPreviewClipKey, s.project.clips);
+      if (previewStale === s.previewStale) return s;
+      return {
+        previewStale,
+        playing: previewStale ? false : s.playing,
+      };
+    }
+
     let clips = updateClip(s.project.clips, clipId, (c) => ({
       ...c,
       inMs: nextIn,
@@ -390,11 +413,12 @@ export const useProject = create<ProjectState>((set) => ({
     clips = rechainAllSharedFit(clips, s.project.sharedTracks, clipIndex);
 
     const total = projectDurationMs(clips, s.project.overlays);
+    const previewStale = isPreviewStale(s.lastPreviewClipKey, clips);
     return {
       project: { ...s.project, clips, updatedAt: new Date().toISOString() },
       playhead: Math.min(s.playhead, Math.max(0, total)),
-      previewStale: s.lastPreviewClipKey !== '' ? true : s.previewStale,
-      playing: s.lastPreviewClipKey !== '' ? false : s.playing,
+      previewStale,
+      playing: previewStale ? false : s.playing,
     };
   }),
 
@@ -421,7 +445,6 @@ export const useProject = create<ProjectState>((set) => ({
 
   beginTrim: () => set((s) => ({
     trimInProgress: true,
-    previewStale: s.lastPreviewClipKey !== '' ? true : s.previewStale,
     playing: false,
   })),
 
@@ -726,7 +749,33 @@ export const useProject = create<ProjectState>((set) => ({
 
   setClipOffset: (clipId, trackId, ms, scope) => set((s) => {
     const syncKey = scope === 'local' ? 'localTrackSync' : 'sharedTrackSync';
-    let clips = updateClip(s.project.clips, clipId, (clip) => {
+
+    if (scope === 'shared') {
+      const fit = s.project.sharedTracks.find((t) => t.id === trackId && t.source === 'fit');
+      if (fit && s.project.clips.length > 0) {
+        let baseOffsetMs = ms;
+        const clipIndex = s.project.clips.findIndex((c) => c.id === clipId);
+        if (clipIndex > 0) {
+          let durationBefore = 0;
+          for (let i = 0; i < clipIndex; i++) {
+            durationBefore += clipDurationMs(s.project.clips[i]!);
+          }
+          baseOffsetMs = ms + durationBefore;
+        }
+        const clips = applySharedFitAnchorToAllClips(
+          s.project.clips,
+          trackId,
+          fit,
+          'manual',
+          baseOffsetMs,
+        );
+        return {
+          project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+        };
+      }
+    }
+
+    const clips = updateClip(s.project.clips, clipId, (clip) => {
       const prev = clip[syncKey][trackId];
       return {
         ...clip,
@@ -740,15 +789,6 @@ export const useProject = create<ProjectState>((set) => ({
         },
       };
     });
-    if (scope === 'shared') {
-      const fit = s.project.sharedTracks.find((t) => t.id === trackId && t.source === 'fit');
-      if (fit) {
-        const fromIndex = clips.findIndex((c) => c.id === clipId);
-        if (fromIndex >= 0) {
-          clips = rechainedSharedFitSyncFrom(clips, trackId, fromIndex);
-        }
-      }
-    }
     return {
       project: { ...s.project, clips, updatedAt: new Date().toISOString() },
     };
@@ -762,26 +802,42 @@ export const useProject = create<ProjectState>((set) => ({
     const track = trackList?.find((t) => t.id === trackId);
     if (!track) return s;
 
-    const clips = updateClip(s.project.clips, clipId, (clip) => {
-      const prev = clip[syncKey][trackId];
-      const clipIndex = s.project.clips.findIndex((c) => c.id === clipId);
-      const offsetMs = anchor === 'manual'
-        ? (prev?.offsetMs ?? 0)
-        : anchor === 'utc' && track.source === 'fit' && clipIndex >= 0
-          ? defaultFitTrackSyncForClip(s.project.clips, clipIndex, track).offsetMs
-          : computeOffsetFromAnchor(anchor, clip.media, track);
-      return {
-        ...clip,
-        [syncKey]: {
-          ...clip[syncKey],
-          [trackId]: {
-            offsetMs,
-            playSpeedPercent: prev?.playSpeedPercent ?? 100,
-            anchor,
+    const editedIndex = s.project.clips.findIndex((c) => c.id === clipId);
+
+    let clips: TimelineClip[];
+    if (scope === 'shared' && track.source === 'fit') {
+      const manualSeed = anchor === 'manual' && editedIndex >= 0
+        ? effectiveSharedFitOffsetMs(s.project.clips, editedIndex, trackId)
+        : undefined;
+      clips = applySharedFitAnchorToAllClips(
+        s.project.clips,
+        trackId,
+        track,
+        anchor,
+        manualSeed,
+      );
+    } else {
+      clips = updateClip(s.project.clips, clipId, (clip) => {
+        const prev = clip[syncKey][trackId];
+        const clipIndex = s.project.clips.findIndex((c) => c.id === clipId);
+        const offsetMs = anchor === 'manual'
+          ? (prev?.offsetMs ?? 0)
+          : anchor === 'utc' && track.source === 'fit' && clipIndex >= 0
+            ? defaultFitTrackSyncForClip(s.project.clips, clipIndex, track).offsetMs
+            : computeOffsetFromAnchor(anchor, clip.media, track);
+        return {
+          ...clip,
+          [syncKey]: {
+            ...clip[syncKey],
+            [trackId]: {
+              offsetMs,
+              playSpeedPercent: prev?.playSpeedPercent ?? 100,
+              anchor,
+            },
           },
-        },
-      };
-    });
+        };
+      });
+    }
     return {
       project: { ...s.project, clips, updatedAt: new Date().toISOString() },
     };

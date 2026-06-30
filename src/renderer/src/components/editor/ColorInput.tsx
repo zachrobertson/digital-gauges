@@ -1,4 +1,4 @@
-import { colorToPickerHex } from '../../lib/colorInput';
+import { colorMatchesDefault, colorToPickerHex } from '../../lib/colorInput';
 import type { TextColorChoice } from '../../gauges/gaugeEditorLayout';
 
 interface ColorInputProps {
@@ -44,38 +44,24 @@ interface OptionalColorInputProps {
   label: string;
   value: TextColorChoice;
   onChange: (value: TextColorChoice) => void;
-  autoLabel?: string;
-  /** Hex/rgba used when switching off Auto. */
-  customFallback?: string;
+  /** Inherited color shown in the picker when value is `default`. */
+  defaultColor: string;
 }
 
+/** Color picker that shows the inherited default and stores `default` until overridden. */
 export function OptionalColorInput({
   label,
   value,
   onChange,
-  autoLabel = 'Auto',
-  customFallback = '#ffffff',
+  defaultColor,
 }: OptionalColorInputProps) {
-  const isAuto = value === 'default';
+  const display = value === 'default' ? defaultColor : value;
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <label className="field-label">{label}</label>
-        <label className="flex items-center gap-1.5 text-xs text-white/50 shrink-0">
-          <input
-            type="checkbox"
-            checked={isAuto}
-            onChange={(e) => onChange(e.target.checked ? 'default' : customFallback)}
-          />
-          {autoLabel}
-        </label>
-      </div>
-      <ColorInput
-        value={isAuto ? customFallback : value}
-        onChange={(c) => onChange(c)}
-        disabled={isAuto}
-      />
-    </div>
+    <ColorInput
+      label={label}
+      value={display}
+      onChange={(next) => onChange(colorMatchesDefault(next, defaultColor) ? 'default' : next)}
+    />
   );
 }

@@ -13,6 +13,15 @@ import type { TelemetryTrack } from '../shared/types/telemetry';
 import type { RecoveryInfo } from '../shared/types/ipc';
 import { assignClipTimelinePositions } from '../shared/timeline';
 import { DEFAULT_TRACK_SYNC } from '../shared/types/sync';
+import type {
+  AppSettings,
+  DistanceUnits,
+  PreviewResolution,
+  SpeedUnits,
+} from '../shared/types/settings';
+import { DEFAULT_APP_SETTINGS } from '../shared/types/settings';
+
+export type { AppSettings };
 
 const DATA_GAUGE_PLUGIN_ID = 'builtin:dataGauge';
 
@@ -38,10 +47,6 @@ function migrateGauge(g: GaugeInstance): GaugeInstance {
       ...(migration.displayStyle ? { displayStyle: migration.displayStyle } : {}),
     },
   };
-}
-
-export interface AppSettings {
-  lastProjectPath: string | null;
 }
 
 function draftPath(): string {
@@ -312,19 +317,39 @@ function projectHasSessionContent(project: Project): boolean {
     || project.gauges.length > 0;
 }
 
+function normalizeSpeedUnits(v: unknown): SpeedUnits {
+  return v === 'mph' ? 'mph' : 'kmh';
+}
+
+function normalizeDistanceUnits(v: unknown): DistanceUnits {
+  return v === 'mi' ? 'mi' : 'km';
+}
+
+function normalizePreviewResolution(v: unknown): PreviewResolution {
+  return v === '1080p' || v === 'source' ? v : '720p';
+}
+
 export async function readSettings(): Promise<AppSettings> {
   try {
     const raw = await readFile(settingsPath(), 'utf8');
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
-    return { lastProjectPath: parsed.lastProjectPath ?? null };
+    // Merge defaults so older settings.json files (missing new fields) stay valid.
+    return {
+      lastProjectPath: parsed.lastProjectPath ?? DEFAULT_APP_SETTINGS.lastProjectPath,
+      speedUnits: normalizeSpeedUnits(parsed.speedUnits),
+      distanceUnits: normalizeDistanceUnits(parsed.distanceUnits),
+      previewResolution: normalizePreviewResolution(parsed.previewResolution),
+    };
   } catch {
-    return { lastProjectPath: null };
+    return { ...DEFAULT_APP_SETTINGS };
   }
 }
 
-export async function writeSettings(patch: Partial<AppSettings>): Promise<void> {
+export async function writeSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   const current = await readSettings();
-  await writeFile(settingsPath(), JSON.stringify({ ...current, ...patch }, null, 2), 'utf8');
+  const next = { ...current, ...patch };
+  await writeFile(settingsPath(), JSON.stringify(next, null, 2), 'utf8');
+  return next;
 }
 
 export async function saveDraft(project: Project): Promise<void> {

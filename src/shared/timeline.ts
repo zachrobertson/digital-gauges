@@ -247,6 +247,19 @@ export function clipBoundariesMs(clips: TimelineClip[]): number[] {
   return clips.map((_, i) => clipStartGlobalMs(clips, i));
 }
 
+/** Stable key for concat preview invalidation (trim, reorder, split, etc.). */
+export function clipKeyFromClips(clips: TimelineClip[]): string {
+  return clips.map((c, i) =>
+    `${i}:${c.id}:${c.media.path}:${clipInMs(c)}:${clipOutMs(c)}`,
+  ).join('|');
+}
+
+/** Whether the current clips differ from the last built preview concat. */
+export function isPreviewStale(lastPreviewClipKey: string, clips: TimelineClip[]): boolean {
+  if (lastPreviewClipKey === '') return false;
+  return clipKeyFromClips(clips) !== lastPreviewClipKey;
+}
+
 /**
  * Map preview `<video>` clock → logical global timeline ms.
  * Uses content mapping so timeline gaps do not shift preview sync.

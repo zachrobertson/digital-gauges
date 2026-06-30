@@ -238,8 +238,7 @@ function BarArcColorsSection({
       <OptionalColorInput
         label={label}
         value={colorValue}
-        autoLabel="Auto (field color)"
-        customFallback={gaugeFillColor}
+        defaultColor={gaugeFillColor}
         onChange={(color) => onPatch({ color })}
       />
       <FillGradientEditor
@@ -460,7 +459,7 @@ function ElementProperties({
         <>
           <NumberRow label="Size" value={element.fontSize} min={6} max={120} step={1} suffix="px"
             onChange={(v) => onPatch({ fontSize: v })} />
-          <OptionalColorInput label="Color" value={element.color} autoLabel="Default" customFallback={gaugeFillColor}
+          <OptionalColorInput label="Color" value={element.color} defaultColor={gaugeFillColor}
             onChange={(color) => onPatch({ color })} />
         </>
       )}
@@ -474,7 +473,7 @@ function ElementProperties({
               onChange={(v) => onPatch({ source: { type: 'builtin', icon: v as TextIcon } })}
             />
           )}
-          <OptionalColorInput label="Color" value={element.color} autoLabel="Default" customFallback={gaugeFillColor}
+          <OptionalColorInput label="Color" value={element.color} defaultColor={gaugeFillColor}
             onChange={(color) => onPatch({ color })} />
         </>
       )}
@@ -880,7 +879,7 @@ function TextSlotStyleEditor({
             </div>
           )}
           {derivedHint && <p className="text-[10px] text-white/40 leading-snug">{derivedHint}</p>}
-          <OptionalColorInput label="Color" value={slot.color} autoLabel="Default" customFallback={defaultColor}
+          <OptionalColorInput label="Color" value={slot.color} defaultColor={defaultColor}
             onChange={(color) => onChange({ ...slot, color })} />
           <NumberRow label="Size" value={slot.fontSize} min={1} step={1} suffix="px"
             onChange={(v) => onChange({ ...slot, fontSize: v })} />

@@ -187,6 +187,78 @@ export function rechainedSharedFitSyncFrom(
 }
 
 /**
+ * Recompute stored shared-FIT offsets for every clip after `fromClipIndex`.
+ * Unlike {@link rechainedSharedFitSyncFrom}, updates manual anchors too so all
+ * clips stay on one continuous FIT timeline.
+ */
+export function rechainedSharedFitOffsetsFrom(
+  clips: TimelineClip[],
+  fitTrackId: string,
+  fromClipIndex: number,
+): TimelineClip[] {
+  if (fromClipIndex >= clips.length - 1) return clips;
+
+  const next = [...clips];
+  for (let i = Math.max(1, fromClipIndex + 1); i < next.length; i++) {
+    const clip = next[i]!;
+    const prev = next[i - 1]!;
+    const sync = clip.sharedTrackSync[fitTrackId];
+    if (!sync) continue;
+    const chained = chainedFitOffsetMs(prev, fitTrackId);
+    if (sync.offsetMs === chained) continue;
+    next[i] = {
+      ...clip,
+      sharedTrackSync: {
+        ...clip.sharedTrackSync,
+        [fitTrackId]: { ...sync, offsetMs: chained },
+      },
+    };
+  }
+  return next;
+}
+
+/**
+ * Apply one shared FIT anchor to every clip and recompute chained offsets.
+ * Shared FIT sync is project-wide — later clips continue the same ride timeline.
+ */
+export function applySharedFitAnchorToAllClips(
+  clips: TimelineClip[],
+  fitTrackId: string,
+  fitTrack: TelemetryTrack,
+  anchor: SyncAnchor,
+  manualSeedOffsetMs?: number,
+): TimelineClip[] {
+  if (clips.length === 0) return clips;
+
+  let next = clips.map((clip, clipIndex) => {
+    const prev = clip.sharedTrackSync[fitTrackId];
+    let offsetMs: number;
+    if (anchor === 'manual') {
+      offsetMs = clipIndex === 0
+        ? (manualSeedOffsetMs ?? prev?.offsetMs ?? 0)
+        : (prev?.offsetMs ?? 0);
+    } else if (anchor === 'utc') {
+      offsetMs = defaultFitTrackSyncForClip(clips, clipIndex, fitTrack).offsetMs;
+    } else {
+      offsetMs = computeOffsetFromAnchor(anchor, clip.media, fitTrack);
+    }
+    return {
+      ...clip,
+      sharedTrackSync: {
+        ...clip.sharedTrackSync,
+        [fitTrackId]: {
+          offsetMs,
+          playSpeedPercent: prev?.playSpeedPercent ?? 100,
+          anchor,
+        },
+      },
+    };
+  });
+
+  return rechainedSharedFitOffsetsFrom(next, fitTrackId, 0);
+}
+
+/**
  * Shared FIT offset used for sampling — clip 2+ chains from the prior clip unless
  * the anchor is manual. Keeps one FIT file continuous across consecutive clips.
  */

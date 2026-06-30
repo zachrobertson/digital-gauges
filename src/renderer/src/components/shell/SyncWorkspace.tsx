@@ -1,17 +1,15 @@
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import { useProject } from '../../store/project';
 import { useVerticalSplit } from '../../lib/useVerticalSplit';
 import { VideoPlayer } from '../player/VideoPlayer';
 import { Timeline } from '../timeline/Timeline';
-import { ClipList } from '../timeline/ClipList';
 import { SyncControlsPanel } from '../sync/SyncControlsPanel';
 import { SyncGaugeHint } from '../sync/SyncGaugeHint';
 
-/** Sync page — clips (left) · video + sync strip (center) · controls (right). */
+/** Sync page — video + sync strip (center) · controls + clips (right). */
 export function SyncWorkspace() {
   const clips = useProject((s) => s.project.clips);
   const hasClips = clips.length > 0;
-  const [linkLocked, setLinkLocked] = useState(true);
   const centerRef = useRef<HTMLElement>(null);
   const {
     fraction: videoFraction,
@@ -22,20 +20,7 @@ export function SyncWorkspace() {
 
   return (
     <div className="flex h-full min-h-0">
-      {/* Left: clip list with sync status */}
-      <aside className="w-56 shrink-0 bg-bg-panel border-r border-white/[0.07] p-3.5 overflow-y-auto">
-        {hasClips ? (
-          <>
-            <ClipList showSyncStatus variant="sidebar" />
-            <p className="text-[10.5px] text-textfaint mt-2">Select a clip, then align its data in the panel and waveforms.</p>
-          </>
-        ) : (
-          <p className="text-xs text-textfaint">Add a clip in Edit mode to begin syncing.</p>
-        )}
-      </aside>
-
-      {/* Center: video + sync timeline strip */}
-      <main ref={centerRef} className="flex-1 min-w-0 flex flex-col bg-[#0c1014]">
+      <main ref={centerRef} className="flex-1 min-w-0 flex flex-col bg-[#0c1014] relative z-0 overflow-hidden">
         {hasClips ? (
           <>
             <div
@@ -62,7 +47,7 @@ export function SyncWorkspace() {
               className="min-h-0 flex flex-col overflow-y-auto"
               style={{ flex: `${1 - videoFraction} 1 0%` }}
             >
-              <Timeline linkLocked={linkLocked} />
+              <Timeline />
             </div>
           </>
         ) : (
@@ -72,8 +57,7 @@ export function SyncWorkspace() {
         )}
       </main>
 
-      {/* Right: consolidated sync controls */}
-      <SyncControlsPanel linkLocked={linkLocked} onLinkLockedChange={setLinkLocked} />
+      <SyncControlsPanel />
     </div>
   );
 }

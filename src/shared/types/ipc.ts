@@ -1,6 +1,7 @@
 import type { GaugeTemplateFile, GaugeTemplateSummary } from './gaugeTemplate';
 import type { Project } from './project';
 import type { TelemetryTrack } from './telemetry';
+import type { AppSettings } from './settings';
 
 export type { GaugeTemplateFile, GaugeTemplateSummary };
 
@@ -41,6 +42,9 @@ export interface DigitalGaugesApi {
   loadDraft(): Promise<Project | null>;
   clearDraft(): Promise<void>;
 
+  getAppSettings(): Promise<AppSettings>;
+  updateAppSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+
   startExport(project: Project): Promise<ExportStartResult>;
   startExportSegment(jobId: string, clipIndex: number): Promise<{ framesExpected: number }>;
   finishExportSegment(jobId: string): Promise<void>;
@@ -60,7 +64,6 @@ export interface DigitalGaugesApi {
 
   listUserPlugins(): Promise<UserPluginInfo[]>;
   openUserPluginsFolder(): Promise<void>;
-  installExampleGauge(): Promise<{ ok: boolean; path?: string; alreadyExists?: boolean; error?: string }>;
   onUserPluginsChanged(handler: (plugins: UserPluginInfo[]) => void): () => void;
 
   listGaugeTemplates(): Promise<GaugeTemplateSummary[]>;

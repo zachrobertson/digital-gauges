@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useMemo } from 'react';
-import type { GaugeInstance, GaugeTemplateFile, GaugeTemplateSummary } from '@shared/types';
+import { useCallback, useEffect } from 'react';
+import type { GaugeInstance, GaugeTemplateFile } from '@shared/types';
 import { findPluginById } from '../store/plugins';
 import { useProject } from '../store/project';
 import { useTemplateStore } from '../store/templates';
 import { buildLayoutFromTemplate, specFromGauge } from './gaugeFactory';
-import { builtinTemplate, builtinTemplateSummaries, isBuiltinTemplateId } from './builtinTemplates';
 
 export function useGaugeTemplates() {
-  const diskTemplates = useTemplateStore((s) => s.templates);
+  const templates = useTemplateStore((s) => s.templates);
   const refresh = useTemplateStore((s) => s.refresh);
   const project = useProject((s) => s.project);
   const addGauge = useProject((s) => s.addGauge);
@@ -16,15 +15,6 @@ export function useGaugeTemplates() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  // Bundled defaults appear first, followed by user-saved templates from disk.
-  const templates = useMemo<GaugeTemplateSummary[]>(
-    () => [
-      ...builtinTemplateSummaries(),
-      ...diskTemplates.map((t) => ({ ...t, source: t.source ?? ('user' as const) })),
-    ],
-    [diskTemplates],
-  );
 
   const applyTemplateFile = useCallback(
     (template: GaugeTemplateFile) => {
@@ -81,18 +71,12 @@ export function useGaugeTemplates() {
   }, [project.gauges, refresh]);
 
   const applyTemplate = useCallback(async (id: string) => {
-    if (isBuiltinTemplateId(id)) {
-      const builtin = builtinTemplate(id);
-      if (builtin) applyTemplateFile(builtin);
-      return;
-    }
     const template = await window.api.loadGaugeTemplate(id);
     if (!template) return;
     applyTemplateFile(template);
   }, [applyTemplateFile]);
 
   const deleteTemplate = useCallback(async (id: string) => {
-    if (isBuiltinTemplateId(id)) return;
     await window.api.deleteGaugeTemplate(id);
     await refresh();
   }, [refresh]);

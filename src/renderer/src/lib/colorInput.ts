@@ -17,3 +17,22 @@ export function colorToPickerHex(color: string, fallback = '#000000'): string {
   if (c === 'transparent') return fallback;
   return fallback;
 }
+
+function rgbaAlpha(color: string): number | null {
+  const match = color.trim().match(/^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)/i);
+  if (!match) return null;
+  return Number(match[1]);
+}
+
+/** True when a user-entered color matches the inherited default (stores as `default`). */
+export function colorMatchesDefault(chosen: string, defaultColor: string): boolean {
+  const c = chosen.trim();
+  const d = defaultColor.trim();
+  if (!c) return true;
+  if (c.toLowerCase() === d.toLowerCase()) return true;
+  const cAlpha = rgbaAlpha(c);
+  const dAlpha = rgbaAlpha(d);
+  if (cAlpha != null && cAlpha < 1) return false;
+  if (dAlpha != null && dAlpha < 1) return false;
+  return colorToPickerHex(c, '') === colorToPickerHex(d, '');
+}

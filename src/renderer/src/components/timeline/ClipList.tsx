@@ -1,5 +1,6 @@
+import { useMemo } from 'react';
 import { useProject } from '../../store/project';
-import { clipDurationMs, totalDurationMs } from '@shared/timeline';
+import { clipDurationMs, clipStartGlobalMs, totalDurationMs } from '@shared/timeline';
 import { clipSyncStatus, clipSyncStatusDisplay } from '../../lib/syncStatus';
 
 function formatDuration(ms: number): string {
@@ -12,14 +13,23 @@ function formatDuration(ms: number): string {
 interface Props {
   /** Show per-clip sync status pill (Sync workspace). */
   showSyncStatus?: boolean;
-  /** Sidebar layout — no outer border, taller clip list. */
-  variant?: 'timeline' | 'sidebar';
+  /** Sidebar/panel layout — no outer border, taller clip list. */
+  variant?: 'timeline' | 'sidebar' | 'panel';
+  /** Allow reordering clips via up/down controls. */
+  allowReorder?: boolean;
+  /** Allow removing clips from the list. */
+  allowRemove?: boolean;
 }
 
 /**
- * Ordered clip list — reorder, remove, select active clip for sync editing.
+ * Ordered clip list — select active clip for sync editing; optional reorder/remove.
  */
-export function ClipList({ showSyncStatus = false, variant = 'timeline' }: Props) {
+export function ClipList({
+  showSyncStatus = false,
+  variant = 'timeline',
+  allowReorder = true,
+  allowRemove = true,
+}: Props) {
   const project = useProject((s) => s.project);
   const clips = project.clips;
   const selectedClipId = useProject((s) => s.selectedClipId);
@@ -27,22 +37,29 @@ export function ClipList({ showSyncStatus = false, variant = 'timeline' }: Props
   const removeClip = useProject((s) => s.removeClip);
   const reorderClips = useProject((s) => s.reorderClips);
 
+  const orderedClips = useMemo(
+    () => clips
+      .map((clip, clipIndex) => ({ clip, clipIndex }))
+      .sort((a, b) => clipStartGlobalMs(clips, a.clipIndex) - clipStartGlobalMs(clips, b.clipIndex)),
+    [clips],
+  );
+
   if (clips.length === 0) return null;
 
-  const moveClip = (index: number, dir: -1 | 1) => {
-    const next = index + dir;
+  const moveClip = (clipIndex: number, dir: -1 | 1) => {
+    const next = clipIndex + dir;
     if (next < 0 || next >= clips.length) return;
     const ids = clips.map((c) => c.id);
-    [ids[index], ids[next]] = [ids[next]!, ids[index]!];
+    [ids[clipIndex], ids[next]] = [ids[next]!, ids[clipIndex]!];
     reorderClips(ids);
   };
 
-  const isSidebar = variant === 'sidebar';
+  const isCompact = variant === 'sidebar' || variant === 'panel';
 
   return (
     <div
       className={
-        isSidebar
+        isCompact
           ? 'flex flex-col gap-1.5'
           : 'border-b border-white/5 px-3 py-2 flex flex-col gap-1'
       }
@@ -55,15 +72,15 @@ export function ClipList({ showSyncStatus = false, variant = 'timeline' }: Props
       </div>
       <div
         className={
-          isSidebar
+          isCompact
             ? 'flex flex-col gap-1.5'
             : 'flex flex-col gap-1 max-h-32 overflow-y-auto'
         }
       >
-        {clips.map((clip, i) => {
+        {orderedClips.map(({ clip, clipIndex }, displayIndex) => {
           const selected = clip.id === selectedClipId;
           const statusPill = showSyncStatus
-            ? clipSyncStatusDisplay(clipSyncStatus(clip, i, project))
+            ? clipSyncStatusDisplay(clipSyncStatus(clip, clipIndex, project))
             : null;
           return (
             <div
@@ -79,7 +96,7 @@ export function ClipList({ showSyncStatus = false, variant = 'timeline' }: Props
                 title="Select for sync editing"
               >
                 <div className="truncate">
-                  <span className="text-white/50 mr-1">{i + 1}.</span>
+                  <span className="text-white/50 mr-1">{displayIndex + 1}.</span>
                   <span className="font-medium">{clip.media.filename}</span>
                   <span className="text-white/40 ml-2 font-mono">{formatDuration(clipDurationMs(clip))}</span>
                 </div>
@@ -92,37 +109,43 @@ export function ClipList({ showSyncStatus = false, variant = 'timeline' }: Props
                   </span>
                 )}
               </button>
-              <button
-                type="button"
-                className="btn-ghost text-[10px] py-0 px-1 shrink-0"
-                disabled={i === 0}
-                onClick={() => moveClip(i, -1)}
-                title="Move up"
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                className="btn-ghost text-[10px] py-0 px-1 shrink-0"
-                disabled={i === clips.length - 1}
-                onClick={() => moveClip(i, 1)}
-                title="Move down"
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                className="btn-ghost text-[10px] text-red-300 py-0 px-1 shrink-0"
-                onClick={() => {
-                  if (clips.length === 1) {
-                    if (!window.confirm('Remove the only clip?')) return;
-                  }
-                  removeClip(clip.id);
-                }}
-                title="Remove clip"
-              >
-                ✕
-              </button>
+              {allowReorder && (
+                <>
+                  <button
+                    type="button"
+                    className="btn-ghost text-[10px] py-0 px-1 shrink-0"
+                    disabled={clipIndex === 0}
+                    onClick={() => moveClip(clipIndex, -1)}
+                    title="Move up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost text-[10px] py-0 px-1 shrink-0"
+                    disabled={clipIndex === clips.length - 1}
+                    onClick={() => moveClip(clipIndex, 1)}
+                    title="Move down"
+                  >
+                    ↓
+                  </button>
+                </>
+              )}
+              {allowRemove && (
+                <button
+                  type="button"
+                  className="btn-ghost text-[10px] text-red-300 py-0 px-1 shrink-0"
+                  onClick={() => {
+                    if (clips.length === 1) {
+                      if (!window.confirm('Remove the only clip?')) return;
+                    }
+                    removeClip(clip.id);
+                  }}
+                  title="Remove clip"
+                >
+                  ✕
+                </button>
+              )}
             </div>
           );
         })}

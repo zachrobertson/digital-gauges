@@ -1,5 +1,5 @@
 import { app, BrowserWindow, shell } from 'electron';
-import { mkdir, readFile, writeFile, readdir, copyFile } from 'node:fs/promises';
+import { mkdir, writeFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { build } from 'esbuild';
@@ -61,48 +61,6 @@ export async function openPluginsFolder(): Promise<void> {
   const folder = getPluginsFolder();
   await ensureFolder(folder);
   shell.openPath(folder);
-}
-
-export interface InstallExampleResult {
-  ok: boolean;
-  path?: string;
-  alreadyExists?: boolean;
-  error?: string;
-}
-
-const DEMO_GAUGE_NAME = 'demo-stats.gauge.tsx';
-
-export async function installExampleGauge(): Promise<InstallExampleResult> {
-  const folder = getPluginsFolder();
-  await ensureFolder(folder);
-  const dest = join(folder, DEMO_GAUGE_NAME);
-  if (existsSync(dest)) {
-    return { ok: true, path: dest, alreadyExists: true };
-  }
-
-  const source = resolveExampleSource();
-  if (!source) {
-    return { ok: false, error: 'Example gauge source not found' };
-  }
-
-  try {
-    await copyFile(source, dest);
-    await loadOrReload(dest);
-    return { ok: true, path: dest };
-  } catch (err) {
-    return { ok: false, error: (err as Error).message };
-  }
-}
-
-function resolveExampleSource(): string | null {
-  const candidates = [
-    join(app.getAppPath(), 'examples', DEMO_GAUGE_NAME),
-    join(app.getAppPath(), '..', 'examples', DEMO_GAUGE_NAME),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-  return null;
 }
 
 async function ensureFolder(p: string): Promise<void> {
@@ -208,17 +166,6 @@ async function ensureExampleGauge(folder: string): Promise<void> {
   const example = join(folder, 'example.gauge.tsx.txt');
   if (existsSync(example)) return;
 
-  const source = resolveExampleSource();
-  if (source) {
-    const body = await readFile(source, 'utf8');
-    const header = `// Save this file as "myThing.gauge.tsx" (drop the .txt) to load it.
-// Full API reference: docs/writing-gauges.md in the Digital Gauges repo.
-
-`;
-    await writeFile(example, header + body, 'utf8');
-    return;
-  }
-
   const body = `// Save this file as "myThing.gauge.tsx" (drop the .txt) to load it.
 // See docs/writing-gauges.md for the full GaugePlugin API.
 
@@ -243,7 +190,7 @@ const plugin: GaugePlugin = {
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
     ctx.fillStyle = (config as { color?: string }).color ?? '#3ddc97';
-    ctx.font = \`bold \${Math.floor(rect.h * 0.6)}px Inter, system-ui\`;
+    ctx.font = \`bold \${Math.floor(rect.h * 0.6)}px JetBrains Mono, ui-monospace\`;
     ctx.textBaseline = 'middle';
     ctx.fillText(
       \`\${(speed * 3.6).toFixed(0)} \${(config as { label?: string }).label ?? ''}\`,

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { TimelineClip } from '@shared/types';
-import { clipInMs, clipOutMs } from '@shared/timeline';
+import { clipInMs, clipOutMs, clipKeyFromClips } from '@shared/timeline';
 import { useProject } from '../store/project';
 
 const INITIAL_PREVIEW_PROGRESS = {
@@ -13,11 +13,13 @@ const INITIAL_PREVIEW_PROGRESS = {
 let cachedClipKey = '';
 let cachedPreviewPath: string | null = null;
 
-/** Stable key for concat preview invalidation (trim, reorder, split, etc.). */
-export function clipKeyFromClips(clips: TimelineClip[]): string {
-  return clips.map((c, i) =>
-    `${i}:${c.id}:${c.media.path}:${clipInMs(c)}:${clipOutMs(c)}`,
-  ).join('|');
+/**
+ * Invalidate the renderer-side preview cache so the next build re-encodes from
+ * scratch (e.g. after the preview resolution setting changed).
+ */
+export function resetPreviewModuleCache(): void {
+  cachedClipKey = '';
+  cachedPreviewPath = null;
 }
 
 /** Build/load a single concatenated preview file for all clips (trim-aware). */

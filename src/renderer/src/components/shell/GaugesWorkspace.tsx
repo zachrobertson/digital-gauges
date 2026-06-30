@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useProject } from '../../store/project';
 import { findPluginById } from '../../store/plugins';
 import { GaugePicker } from '../editor/GaugePicker';
@@ -12,6 +12,14 @@ import { useGaugeEditorSession } from '../../lib/useGaugeEditorSession';
 export function GaugesWorkspace() {
   const selectedGaugeId = useProject((s) => s.selectedGaugeId);
   const session = useGaugeEditorSession(selectedGaugeId);
+  const prevGaugeIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (selectedGaugeId && selectedGaugeId !== prevGaugeIdRef.current) {
+      session.setShowFrameBounds(true);
+    }
+    prevGaugeIdRef.current = selectedGaugeId;
+  }, [selectedGaugeId, session.setShowFrameBounds]);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -77,6 +85,8 @@ function GaugeCenter({
       onConfigChange={onConfigChange}
       selectedElementIds={session.selectedElementIds}
       onSelectElements={session.setSelectedElementIds}
+      showFrameBounds={session.showFrameBounds}
+      onShowFrameBoundsChange={session.setShowFrameBounds}
       showGrid={session.showGrid}
       onShowGridChange={session.setShowGrid}
       snapEnabled={session.snapEnabled}
@@ -102,7 +112,7 @@ function GaugeCenterHeader() {
         <span className="text-xs text-amber-200/80">Unsupported gauge — recreate to use composite elements.</span>
       ) : (
         <span className="text-xs text-textfaint">
-          Shift+click multi-select · Alt+click deep edit · Ctrl+G group · drag to box-select
+          Shift+click multi-select · Ctrl+G group · drag to box-select
         </span>
       )}
     </div>

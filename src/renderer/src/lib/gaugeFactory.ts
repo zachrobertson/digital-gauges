@@ -27,6 +27,7 @@ import {
   elementLabel,
   isCompositeGaugeConfig,
 } from './gaugeElementFactory';
+import { currentUnitPrefs } from './fieldConfig';
 
 const FIT_SOURCE: TelemetrySource = 'fit';
 
@@ -125,10 +126,14 @@ export function createNewGauge(project: Project): GaugeInstance {
     elements: defaultGaugeElements(DEFAULT_GAUGE_LAYOUT.gaugeRect, defaultField),
   };
 
+  // Seed new gauges with the global unit preferences instead of hard-coded metric.
+  const prefs = currentUnitPrefs();
   const config: Record<string, unknown> = {
     ...defaultConfigForField(defaultField),
     ...appearanceDefaults,
     ...barGaugeDefaults,
+    units: prefs.speedUnits,
+    distanceUnits: prefs.distanceUnits,
     trailColor: '#3ddc97',
     cursorColor: '#ffffff',
     routeScope: 'video',
@@ -154,7 +159,9 @@ export function createNewGauge(project: Project): GaugeInstance {
   };
 }
 
-export function gaugeDisplayLabel(_gauge: GaugeInstance, mergedConfig: Record<string, unknown>): string {
+export function gaugeDisplayLabel(gauge: GaugeInstance, mergedConfig: Record<string, unknown>): string {
+  const custom = gauge.name?.trim();
+  if (custom) return custom;
   if (!isCompositeGaugeConfig(mergedConfig)) return 'Unsupported gauge';
   const layout = mergedConfig.layout as { elements: Parameters<typeof elementLabel>[0][] };
   const visible = layout.elements.filter((e) => e.visible);
@@ -203,6 +210,7 @@ export function instanceFromTemplateSpec(
     rect,
     config,
     placed: false,
+    ...(spec.name?.trim() ? { name: spec.name.trim() } : {}),
   };
 }
 
@@ -234,9 +242,11 @@ export function buildLayoutFromTemplate(
 
 export function specFromGauge(gauge: GaugeInstance, mergedConfig: Record<string, unknown>): GaugeTemplateGaugeSpec {
   const { displayStyle: _ds, field: _f, ...rest } = mergedConfig;
+  const name = gauge.name?.trim();
   return {
     config: { ...rest },
     rect: { ...gauge.rect },
     z: gauge.z,
+    ...(name ? { name } : {}),
   };
 }

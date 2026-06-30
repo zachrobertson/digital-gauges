@@ -50,15 +50,22 @@ function findFitTrack(clip: TimelineClip, project: Project) {
 
 export function clipSyncStatus(
   clip: TimelineClip,
-  _clipIndex: number,
+  clipIndex: number,
   project: Project,
 ): ClipSyncStatus {
   const { track: fitTrack, scope } = findFitTrack(clip, project);
   if (!fitTrack) return 'missing-fit';
 
-  const sync = scope === 'local'
+  let sync = scope === 'local'
     ? clip.localTrackSync[fitTrack.id]
     : clip.sharedTrackSync[fitTrack.id];
+
+  // Shared FIT is one continuous sync — clip 2+ inherit clip 1's mode unless
+  // this clip explicitly overrides with manual (e.g. after a split).
+  if (scope === 'shared' && clipIndex > 0 && sync?.anchor !== 'manual') {
+    sync = project.clips[0]?.sharedTrackSync[fitTrack.id] ?? sync;
+  }
+
   if (sync?.anchor === 'manual') return 'manual';
 
   if (videoUtcMs(clip.media) == null) return 'needs-manual';

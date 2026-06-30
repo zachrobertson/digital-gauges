@@ -43,7 +43,6 @@ interface Props {
   mergedConfig: Record<string, unknown>;
   onConfigChange: (patch: Record<string, unknown>) => void;
   onRectChange: (rect: GaugeInstance['rect']) => void;
-  onRemove: () => void;
   renderDataField: (key: string, prop: JSONSchemaProperty, value: unknown, onChange: (v: unknown) => void) => React.ReactNode;
   onSaveTemplate?: () => void;
   showPreview?: boolean;
@@ -57,7 +56,6 @@ export function GaugeEditor({
   mergedConfig,
   onConfigChange,
   onRectChange,
-  onRemove,
   renderDataField,
   onSaveTemplate,
   showPreview = true,
@@ -71,6 +69,7 @@ export function GaugeEditor({
   const [showGrid, setShowGrid] = useState(true);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [gridSize, setGridSize] = useState(12);
+  const [showFrameBounds, setShowFrameBounds] = useState(true);
   const [internalSelectedIds, setInternalSelectedIds] = useState<string[]>([]);
   const selectedElementIds = selectedElementIdsProp ?? internalSelectedIds;
   const setSelectedElementIds = onSelectElements ?? setInternalSelectedIds;
@@ -81,9 +80,6 @@ export function GaugeEditor({
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100/90">
           This gauge uses an older format that is no longer supported. Create a new gauge to use composite elements (multiple bars, arcs, maps, and text in one panel).
         </div>
-        <button type="button" className="btn-ghost text-red-300 hover:text-red-200" onClick={onRemove}>
-          Remove gauge
-        </button>
       </div>
     );
   }
@@ -141,6 +137,8 @@ export function GaugeEditor({
     enabled: showPreview,
     selectedElementIds,
     onSelectElements: setSelectedElementIds,
+    showFrameBounds,
+    onShowFrameBoundsChange: setShowFrameBounds,
     layout,
     onLayoutChange: setLayout,
     gridSize,
@@ -218,6 +216,7 @@ export function GaugeEditor({
             showGrid={showGrid}
             snapEnabled={snapEnabled}
             gridSize={gridSize}
+            showFrameBounds={showFrameBounds}
           />
           <LabeledSelect
             label="Grid size"
@@ -301,7 +300,6 @@ export function GaugeEditor({
       {onSaveTemplate && isDataGaugePlugin(plugin.id) && (
         <button type="button" className="btn-ghost text-xs" onClick={onSaveTemplate}>Save as template…</button>
       )}
-      <button type="button" className="btn-ghost text-red-300 hover:text-red-200" onClick={onRemove}>Remove gauge</button>
     </div>
   );
 }

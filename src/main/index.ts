@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol, shell } from 'electron';
+import { app, BrowserWindow, Menu, protocol, shell } from 'electron';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { join } from 'node:path';
 import { registerIpc } from './ipc';
@@ -60,6 +60,10 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => mainWindow?.show());
 
+  if (process.platform !== 'darwin') {
+    mainWindow.setMenuBarVisibility(false);
+  }
+
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url);
     return { action: 'deny' };
@@ -74,6 +78,12 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.digitalgauges.app');
+
+  // Custom File/Settings menus live in the renderer TopBar. Remove the native
+  // menu on Windows/Linux so Alt does not reveal Electron's default menu bar.
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null);
+  }
 
   // Resolve `local-media://media/?p=<encoded-absolute-path>` → file on disk.
   //
@@ -105,6 +115,9 @@ app.whenReady().then(() => {
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window);
+    if (process.platform !== 'darwin') {
+      window.setMenuBarVisibility(false);
+    }
   });
 
   registerIpc(() => mainWindow);

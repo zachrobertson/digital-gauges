@@ -14,6 +14,7 @@ import {
   clipStartGlobalMs,
 } from '@shared/timeline';
 import { useProject } from '../../store/project';
+import { usePreferences } from '../../store/preferences';
 import { frameAtClipLocalTime } from '../../lib/telemetry';
 import {
   formatFieldValue,
@@ -43,7 +44,7 @@ interface Props {
   clipMedia: MediaSource;
   syncTracks: TelemetryTrack[];
   syncMap: Record<string, TrackSyncSettings>;
-  linkLocked: boolean;
+  fitDragEnabled: boolean;
   onOffsetChange: (ms: number) => void;
 }
 
@@ -96,11 +97,12 @@ export function SyncViewer({
   selectedClipStartMs,
   totalDurationMs,
   clipBoundariesMs,
-  linkLocked,
+  fitDragEnabled,
   onOffsetChange,
 }: Props) {
   const setPlayhead = useProject((s) => s.setPlayhead);
   const setPlaying = useProject((s) => s.setPlaying);
+  const unitPrefs = usePreferences((s) => s.settings);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startOffset: number } | null>(null);
@@ -301,7 +303,7 @@ export function SyncViewer({
     }
 
     // FIT panel header.
-    ctx.font = '600 10px Inter, system-ui, sans-serif';
+    ctx.font = '600 10px JetBrains Mono, ui-monospace, monospace';
     ctx.fillStyle = 'rgba(61,220,151,0.75)';
     ctx.textBaseline = 'top';
     ctx.fillText('FIT', PAD.l + 4, fitBlockTop);
@@ -399,7 +401,7 @@ export function SyncViewer({
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (linkLocked) {
+    if (!fitDragEnabled) {
       scrubRef.current = true;
       scrubFromClientX(e.clientX);
       userScrolledRef.current = true;
@@ -445,7 +447,7 @@ export function SyncViewer({
       >
         <canvas
           ref={canvasRef}
-          className={`block touch-pan-x ${linkLocked ? 'cursor-crosshair' : 'cursor-ew-resize'}`}
+          className={`block touch-pan-x ${fitDragEnabled ? 'cursor-ew-resize' : 'cursor-crosshair'}`}
           style={{ minWidth: contentWidth > viewportWidth ? contentWidth : undefined }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -460,7 +462,7 @@ export function SyncViewer({
             <div key={s.field} className="rounded bg-white/[0.03] px-2 py-1 text-white/50">
               <span style={{ color: s.color }}>{s.field}</span>
               {' '}
-              {formatFieldValue(s.field, merged[s.field] as number | undefined)}
+              {formatFieldValue(s.field, merged[s.field] as number | undefined, unitPrefs)}
             </div>
           ))}
         </div>

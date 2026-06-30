@@ -1,10 +1,10 @@
 /** Small canvas drawing helpers shared by built-in gauges. */
 
+import { DEFAULT_FONT_FAMILY } from '../lib/fonts';
 import {
   type FrameShape,
   type FrameStyleConfig,
   type LegacyCornerStyle,
-  frameCornerRadiusPx,
   panelEllipseGeometry,
   resolveFrameStyle,
 } from './frameStyle';
@@ -57,7 +57,7 @@ export function panelStyleFromConfig(config: AppearanceConfig): PanelStyle {
     borderColor: config.panelBorder ?? DEFAULT_PANEL_BORDER,
     opacity: config.panelOpacity ?? 0.65,
     fontScale: config.fontScale ?? 1,
-    fontFamily: config.fontFamily ?? 'Inter',
+    fontFamily: config.fontFamily ?? DEFAULT_FONT_FAMILY,
     frameShape: shape,
     frameCornerRadius: cornerRadius,
   };
@@ -75,8 +75,8 @@ function buildPanelPath(
     ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     return;
   }
-  const radius = frameCornerRadiusPx(style.frameCornerRadius ?? 0, rect);
-  roundRect(ctx, rect.x, rect.y, rect.w, rect.h, radius);
+  ctx.beginPath();
+  ctx.rect(rect.x, rect.y, rect.w, rect.h);
 }
 
 /** Clip drawing to the on-video gauge placement rect (axis-aligned bounding box). */
@@ -171,7 +171,7 @@ export function drawLabel(
   style?: Pick<PanelStyle, 'fontScale' | 'fontFamily'>,
 ): void {
   const scale = style?.fontScale ?? 1;
-  const family = style?.fontFamily ?? 'Inter';
+  const family = style?.fontFamily ?? DEFAULT_FONT_FAMILY;
   ctx.fillStyle = color;
   ctx.font = `500 ${Math.floor(size * scale)}px ${family}, system-ui, sans-serif`;
   ctx.textBaseline = 'top';
@@ -188,7 +188,7 @@ export function drawBigNumber(
   style?: Pick<PanelStyle, 'fontScale' | 'fontFamily'>,
 ): void {
   const scale = style?.fontScale ?? 1;
-  const family = style?.fontFamily ?? 'Inter';
+  const family = style?.fontFamily ?? DEFAULT_FONT_FAMILY;
   ctx.fillStyle = color;
   ctx.font = `700 ${Math.floor(size * scale)}px ${family}, system-ui, sans-serif`;
   ctx.textBaseline = 'middle';
@@ -200,7 +200,7 @@ export function unitFont(
   style?: Pick<PanelStyle, 'fontScale' | 'fontFamily'>,
 ): string {
   const scale = style?.fontScale ?? 1;
-  const family = style?.fontFamily ?? 'Inter';
+  const family = style?.fontFamily ?? DEFAULT_FONT_FAMILY;
   return `500 ${Math.floor(rectH * 0.18 * scale)}px ${family}, system-ui, sans-serif`;
 }
 
