@@ -1,6 +1,6 @@
 import { resolveExportDimensions, type ExportResolution } from '../../shared/export';
-import { spawn } from 'node:child_process';// @ts-expect-error — ffprobe-static doesn't ship type declarations.
-import ffprobePath from 'ffprobe-static';
+import { spawn } from 'node:child_process';
+import { FFPROBE_BIN } from '../ffmpeg-binaries';
 
 export interface FfprobeStream {
   index: number;
@@ -30,10 +30,6 @@ export interface FfprobeResult {
   streams: FfprobeStream[];
   format: FfprobeFormat;
 }
-
-const FFPROBE_BIN: string =
-  (ffprobePath as unknown as { path?: string })?.path ??
-  (ffprobePath as unknown as string);
 
 /**
  * Wraps ffprobe -print_format json -show_format -show_streams.
@@ -112,6 +108,19 @@ export function probeCreationTime(probe: FfprobeResult): string | undefined {
   const ms = new Date(raw).getTime();
   if (!Number.isFinite(ms)) return undefined;
   return new Date(ms).toISOString();
+}
+
+export function extractBrandLabel(probe: FfprobeResult): string | null {
+  const make = probe.format?.tags?.['com.apple.quicktime.make']
+    ?? probe.format?.tags?.['make']
+    ?? probe.format?.tags?.['MAKE'];
+  const model = probe.format?.tags?.['com.apple.quicktime.model']
+    ?? probe.format?.tags?.['model']
+    ?? probe.format?.tags?.['MODEL'];
+  if (make && model) return `${make} ${model}`;
+  if (make) return make;
+  if (model) return model;
+  return null;
 }
 
 export interface ExportMediaInfo {

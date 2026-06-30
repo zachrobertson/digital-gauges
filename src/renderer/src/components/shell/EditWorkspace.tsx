@@ -826,25 +826,27 @@ function EditTimeline() {
           Ripple delete
         </button>
         {(previewStale || previewBuilding) && !trimInProgress && (
-          <button
-            type="button"
-            className="btn-elevated text-xs flex items-center gap-1.5 relative"
-            disabled={previewBuilding || busy !== null}
-            onClick={() => generatePreview()}
-            title="Rebuild concatenated preview from current clips"
-          >
-            {previewBuilding ? (
-              <>
-                <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Generating…
-              </>
-            ) : (
-              <>
-                <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-                Generate Preview
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="btn-elevated text-xs flex items-center gap-1.5 relative"
+              disabled={previewBuilding || busy !== null}
+              onClick={() => generatePreview()}
+              title="Rebuild concatenated preview from current clips"
+            >
+              {previewBuilding ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Generating…
+                </>
+              ) : (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+                  Generate Preview
+                </>
+              )}
+            </button>
+          </div>
         )}
         <span className="ml-auto text-[11px] font-mono text-textfaint">
           {clips.length} clip{clips.length !== 1 ? 's' : ''}

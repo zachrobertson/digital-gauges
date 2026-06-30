@@ -9,3 +9,5 @@ data/
 .vite/
 .electron-vite/
 release/
+.vscode/
+.cursor/

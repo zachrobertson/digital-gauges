@@ -29,14 +29,13 @@ import {
 } from './gaugeElementFactory';
 
 const FIT_SOURCE: TelemetrySource = 'fit';
-const CAMERA_SOURCES: TelemetrySource[] = ['gopro', 'insta360', 'dji', 'sony', 'camm'];
 
 export interface FieldOption {
   field: TelemetryField;
   trackId: string;
   trackLabel: string;
   source: TelemetrySource;
-  group: 'fit' | 'camera' | 'derived';
+  group: 'fit' | 'derived';
 }
 
 export const DERIVED_FIELD_DEPS: Partial<Record<TelemetryField, TelemetryField>> = {
@@ -50,8 +49,7 @@ export function collectFieldOptions(
   const out: FieldOption[] = [];
   const seen = new Set<string>();
   for (const track of tracks) {
-    const group = track.source === FIT_SOURCE ? 'fit' as const : 'camera' as const;
-    if (group === 'camera' && !CAMERA_SOURCES.includes(track.source)) continue;
+    if (track.source !== FIT_SOURCE) continue;
     for (const field of track.fields) {
       if (!SCALAR_GAUGE_FIELDS.includes(field as TelemetryField)) continue;
       const key = `${field}:${track.id}`;
@@ -62,7 +60,7 @@ export function collectFieldOptions(
         trackId: track.id,
         trackLabel: track.brand,
         source: track.source,
-        group,
+        group: 'fit',
       });
     }
   }

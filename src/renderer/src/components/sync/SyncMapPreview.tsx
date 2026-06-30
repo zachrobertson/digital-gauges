@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useProject } from '../../store/project';
-import { pickCameraTrack } from '@shared/sync';
 import { drawGpsMapOnCanvas } from '../../gauges/gpsMapDraw';
 import { buildRoutePolyline, frameAtGlobalTime } from '../../lib/telemetry';
 
@@ -19,18 +18,14 @@ export function SyncMapPreview() {
   const selectedClip = project.clips.find((c) => c.id === selectedClipId) ?? project.clips[0] ?? null;
   if (!selectedClip) return null;
 
-  const cameraTrack = pickCameraTrack(selectedClip.localTracks);
   const localFit = selectedClip.localTracks.find((t) => t.source === 'fit');
   const sharedFit = project.sharedTracks.find((t) => t.source === 'fit');
   const fitTrack = localFit ?? sharedFit;
 
-  const cameraHasGps = Boolean(
-    cameraTrack?.fields.includes('lat') && cameraTrack?.fields.includes('lon'),
-  );
   const fitHasGps = Boolean(
     fitTrack?.fields.includes('lat') && fitTrack?.fields.includes('lon'),
   );
-  if (!cameraHasGps && !fitHasGps) return null;
+  if (!fitHasGps) return null;
 
   const draw = useCallback(() => {
     const cvs = canvasRef.current;

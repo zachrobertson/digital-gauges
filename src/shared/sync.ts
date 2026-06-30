@@ -9,31 +9,10 @@ import {
   overlayVisibleAt,
 } from './timeline';
 
-/**
- * First non-FIT track with GPS or 3-axis IMU — used for wall-clock fallback
- * when the video container has no creation_time tag.
- */
-export function pickCameraTrack(tracks: TelemetryTrack[]): TelemetryTrack | undefined {
-  return tracks.find((t) => {
-    if (t.source === 'fit') return false;
-    if (t.fields.includes('lat') && t.fields.includes('lon')) return true;
-    return t.fields.includes('accelX')
-      && t.fields.includes('accelY')
-      && t.fields.includes('accelZ');
-  });
-}
-
-/** UTC epoch ms for video t=0 — prefers MP4 creation_time over camera track start. */
-export function videoUtcMs(
-  video: MediaSource | null,
-  cameraTrack?: TelemetryTrack,
-): number | null {
+/** UTC epoch ms for video t=0 — read from the MP4 container creation_time tag. */
+export function videoUtcMs(video: MediaSource | null): number | null {
   if (video?.creationTime) {
     const ms = new Date(video.creationTime).getTime();
-    if (Number.isFinite(ms)) return ms;
-  }
-  if (cameraTrack?.startTime) {
-    const ms = new Date(cameraTrack.startTime).getTime();
     if (Number.isFinite(ms)) return ms;
   }
   return null;
@@ -54,7 +33,6 @@ export function computeOffsetFromAnchor(
   anchor: SyncAnchor,
   video: MediaSource | null,
   track: TelemetryTrack,
-  cameraTrack?: TelemetryTrack,
 ): number {
   switch (anchor) {
     case 'videoStart':
@@ -63,7 +41,7 @@ export function computeOffsetFromAnchor(
       if (!video) return 0;
       return video.durationMs - trackSpanMs(track);
     case 'utc': {
-      const videoMs = videoUtcMs(video, cameraTrack);
+      const videoMs = videoUtcMs(video);
       const trackMs = new Date(track.startTime).getTime();
       if (videoMs == null || !Number.isFinite(trackMs)) return 0;
       return trackMs - videoMs;
@@ -84,13 +62,12 @@ export function trackOffsetMs(
 export function defaultFitTrackSync(
   video: MediaSource | null,
   fitTrack: TelemetryTrack,
-  cameraTrack?: TelemetryTrack,
 ): TrackSyncSettings {
   const anchor: SyncAnchor = 'utc';
   return {
     anchor,
     playSpeedPercent: 100,
-    offsetMs: computeOffsetFromAnchor(anchor, video, fitTrack, cameraTrack),
+    offsetMs: computeOffsetFromAnchor(anchor, video, fitTrack),
   };
 }
 
@@ -115,12 +92,10 @@ export function defaultFitTrackSyncForClip(
   clips: TimelineClip[],
   clipIndex: number,
   fitTrack: TelemetryTrack,
-  cameraTrack?: TelemetryTrack,
 ): TrackSyncSettings {
   const clip = clips[clipIndex];
-  if (!clip) return defaultFitTrackSync(null, fitTrack, cameraTrack);
+  if (!clip) return defaultFitTrackSync(null, fitTrack);
 
-  const camera = cameraTrack ?? pickCameraTrack(clip.localTracks);
   const anchor: SyncAnchor = 'utc';
 
   if (clipIndex > 0) {
@@ -134,15 +109,15 @@ export function defaultFitTrackSyncForClip(
     }
   }
 
-  if (videoUtcMs(clip.media, camera) != null) {
+  if (videoUtcMs(clip.media) != null) {
     return {
       anchor,
       playSpeedPercent: 100,
-      offsetMs: computeOffsetFromAnchor(anchor, clip.media, fitTrack, camera),
+      offsetMs: computeOffsetFromAnchor(anchor, clip.media, fitTrack),
     };
   }
 
-  return defaultFitTrackSync(clip.media, fitTrack, camera);
+  return defaultFitTrackSync(clip.media, fitTrack);
 }
 
 /**
@@ -230,11 +205,6 @@ export function effectiveSharedFitOffsetMs(
   return chainedFitOffsetMs(prev, fitTrackId);
 }
 
-/** Default sync for a camera telemetry track (fixed at video t=0). */
-export function defaultCameraTrackSync(): TrackSyncSettings {
-  return { anchor: 'videoStart', offsetMs: 0, playSpeedPercent: 100 };
-}
-
 /**
  * Recompute offsetMs for every non-manual FIT track (e.g. after video load).
  * Returns a new trackSync map; does not mutate the input.
@@ -243,7 +213,6 @@ export function refreshAnchoredTrackSync(
   trackSync: Record<string, TrackSyncSettings>,
   tracks: TelemetryTrack[],
   video: MediaSource | null,
-  cameraTrack?: TelemetryTrack,
 ): Record<string, TrackSyncSettings> {
   const next = { ...trackSync };
   for (const t of tracks) {
@@ -252,7 +221,7 @@ export function refreshAnchoredTrackSync(
     if (!sync || sync.anchor === 'manual') continue;
     next[t.id] = {
       ...sync,
-      offsetMs: computeOffsetFromAnchor(sync.anchor, video, t, cameraTrack),
+      offsetMs: computeOffsetFromAnchor(sync.anchor, video, t),
     };
   }
   return next;
@@ -294,7 +263,6 @@ export function fitOffsetSliderRange(
   trackSync: Record<string, TrackSyncSettings>,
   clipMedia?: MediaSource | null,
 ): { min: number; max: number } {
-  const camera = pickCameraTrack(tracks);
   let span = Math.max(videoDurationMs, 60_000);
 
   for (const t of tracks) {
@@ -302,10 +270,8 @@ export function fitOffsetSliderRange(
     const fitDur = trackSpanMs(t);
     span = Math.max(span, fitDur);
     span = Math.max(span, Math.abs(trackOffsetMs(trackSync, t.id)));
-    if (camera) {
-      const utcOffset = computeOffsetFromAnchor('utc', clipMedia ?? null, t, camera);
-      span = Math.max(span, Math.abs(utcOffset));
-    }
+    const utcOffset = computeOffsetFromAnchor('utc', clipMedia ?? null, t);
+    span = Math.max(span, Math.abs(utcOffset));
   }
 
   const limit = Math.min(Math.max(span + 60_000, 120_000), 4 * 60 * 60 * 1000);
@@ -317,11 +283,9 @@ export function refreshClipSharedTrackSync(
   sharedTrackSync: Record<string, TrackSyncSettings>,
   sharedTracks: TelemetryTrack[],
   clipMedia: MediaSource,
-  localTracks: TelemetryTrack[],
   clipIndex?: number,
   clips?: TimelineClip[],
 ): Record<string, TrackSyncSettings> {
-  const camera = pickCameraTrack(localTracks);
   const next = { ...sharedTrackSync };
   for (const t of sharedTracks) {
     if (t.source !== 'fit') continue;
@@ -338,7 +302,7 @@ export function refreshClipSharedTrackSync(
       };
       continue;
     }
-    const utcOffset = computeOffsetFromAnchor(sync.anchor, clipMedia, t, camera);
+    const utcOffset = computeOffsetFromAnchor(sync.anchor, clipMedia, t);
     next[t.id] = { ...sync, offsetMs: utcOffset };
   }
   return next;

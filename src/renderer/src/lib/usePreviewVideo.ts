@@ -3,6 +3,12 @@ import type { TimelineClip } from '@shared/types';
 import { clipInMs, clipOutMs } from '@shared/timeline';
 import { useProject } from '../store/project';
 
+const INITIAL_PREVIEW_PROGRESS = {
+  phase: 'encoding' as const,
+  percent: 0,
+  message: 'Preparing preview…',
+};
+
 /** Renderer cache — avoids blank/loading flash when switching workspaces. */
 let cachedClipKey = '';
 let cachedPreviewPath: string | null = null;
@@ -20,10 +26,10 @@ export function usePreviewVideo(clips: TimelineClip[]): {
   loading: boolean;
   error: string | null;
 } {
-  const lastPreviewClipKey = useProject((s) => s.lastPreviewClipKey);
   const previewGeneration = useProject((s) => s.previewGeneration);
   const completePreviewBuild = useProject((s) => s.completePreviewBuild);
   const failPreviewBuild = useProject((s) => s.failPreviewBuild);
+  const setPreviewProgress = useProject((s) => s.setPreviewProgress);
 
   const segments = clips.map((c) => ({
     path: c.media.path,
@@ -37,7 +43,9 @@ export function usePreviewVideo(clips: TimelineClip[]): {
     clipKey === cachedClipKey ? cachedPreviewPath : null,
   );
   const [loading, setLoading] = useState(
-    clips.length > 0 && clipKey !== cachedClipKey && lastPreviewClipKey === '',
+    () => clips.length > 0
+      && clipKey !== cachedClipKey
+      && useProject.getState().lastPreviewClipKey === '',
   );
   const [error, setError] = useState<string | null>(null);
   const lastBuiltGenerationRef = useRef(0);
@@ -49,14 +57,24 @@ export function usePreviewVideo(clips: TimelineClip[]): {
       setPreviewPath(null);
       setLoading(false);
       setError(null);
+      failPreviewBuild();
       return;
     }
 
-    const needsInitialBuild = lastPreviewClipKey === '' && clipKey !== cachedClipKey;
+    const lastPreviewClipKey = useProject.getState().lastPreviewClipKey;
+    const cacheValid = clipKey === cachedClipKey && !!cachedPreviewPath;
+    const needsInitialBuild = lastPreviewClipKey === '' && !cacheValid;
     const needsManualBuild = previewGeneration > lastBuiltGenerationRef.current;
+    // Module cache can be cold after a remount/HMR even though the store recorded a build.
+    const needsCacheRefresh = lastPreviewClipKey === clipKey && !cacheValid;
 
-    if (!needsInitialBuild && !needsManualBuild) {
-      if (clipKey === cachedClipKey && cachedPreviewPath) {
+    if (!needsInitialBuild && !needsManualBuild && !needsCacheRefresh) {
+      if (cacheValid) {
+        setPreviewPath(cachedPreviewPath);
+        setLoading(false);
+        setError(null);
+      } else if (cachedPreviewPath && lastPreviewClipKey !== clipKey) {
+        // Timeline changed (trim/reorder) — keep showing the outdated concat until regenerate.
         setPreviewPath(cachedPreviewPath);
         setLoading(false);
         setError(null);
@@ -71,15 +89,40 @@ export function usePreviewVideo(clips: TimelineClip[]): {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    useProject.getState().setPlaying(false);
+    useProject.setState({
+      previewBuilding: true,
+      previewProgress: INITIAL_PREVIEW_PROGRESS,
+      playing: false,
+    });
+
+    const offProgress = window.api.onPreviewProgress((progress) => {
+      if (!cancelled) setPreviewProgress(progress);
+    });
 
     window.api.buildPreviewVideo(segments)
-      .then(({ path }) => {
+      .then(({ path, cancelled: wasCancelled }) => {
+        if (wasCancelled) {
+          if (cancelled) {
+            setLoading(false);
+            setPreviewProgress(null);
+            // Superseded by a newer build — leave previewBuilding to that effect.
+          }
+          return;
+        }
+        if (!path) {
+          if (!cancelled) {
+            setLoading(false);
+            setPreviewProgress(null);
+            failPreviewBuild();
+          }
+          return;
+        }
         if (cancelled) return;
         cachedClipKey = clipKey;
         cachedPreviewPath = path;
         setPreviewPath(path);
         setLoading(false);
+        setPreviewProgress(null);
         completePreviewBuild(clipKey);
       })
       .catch((e) => {
@@ -94,8 +137,10 @@ export function usePreviewVideo(clips: TimelineClip[]): {
 
     return () => {
       cancelled = true;
+      offProgress();
+      void window.api.cancelPreviewBuild();
     };
-  }, [clipKey, clips.length, lastPreviewClipKey, previewGeneration, completePreviewBuild, failPreviewBuild]);
+  }, [clipKey, clips.length, previewGeneration, completePreviewBuild, failPreviewBuild, setPreviewProgress]);
 
   return { previewPath, loading, error };
 }

@@ -8,6 +8,7 @@ import { ProcessingOverlay } from './components/ProcessingOverlay';
 import { useProjectAutosave } from './lib/useProjectAutosave';
 import { useSessionRecovery } from './lib/useSessionRecovery';
 import { useExport } from './lib/useExport';
+import { PreviewVideoProvider } from './lib/PreviewVideoProvider';
 import { useProject } from './store/project';
 import { usePlugins } from './store/plugins';
 
@@ -45,17 +46,19 @@ export default function App() {
   }, []);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-bg text-white">
-      <TopBar />
+    <PreviewVideoProvider>
+      <div className="flex flex-col h-full overflow-hidden bg-bg text-white">
+        <TopBar />
 
-      <div className="flex-1 min-h-0">
-        {mode === 'edit' && <EditWorkspace />}
-        {mode === 'sync' && <SyncWorkspace />}
-        {mode === 'gauges' && <GaugesWorkspace />}
-        {mode === 'export' && <ExportWorkspace exportApi={exportApi} />}
+        <div className="flex-1 min-h-0">
+          {mode === 'edit' && <EditWorkspace />}
+          {mode === 'sync' && <SyncWorkspace />}
+          {mode === 'gauges' && <GaugesWorkspace />}
+          {mode === 'export' && <ExportWorkspace exportApi={exportApi} />}
+        </div>
+
+        <ProcessingOverlay message={busyMessage} />
       </div>
-
-      <ProcessingOverlay message={busyMessage} />
-    </div>
+    </PreviewVideoProvider>
   );
 }

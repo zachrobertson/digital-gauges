@@ -76,6 +76,48 @@ export function totalDurationMs(clips: TimelineClip[]): number {
   return clips.reduce((sum, c) => sum + clipDurationMs(c), 0);
 }
 
+/**
+ * Clamp a clip's desired global start so it cannot overlap its neighbors in the
+ * current order. Gaps are allowed; the clip is confined to the free span between
+ * the previous clip's end and the next clip's start.
+ */
+export function clampClipStartGlobalMs(
+  clips: TimelineClip[],
+  clipIndex: number,
+  desiredStartMs: number,
+): number {
+  const clip = clips[clipIndex];
+  if (!clip) return Math.max(0, desiredStartMs);
+  const dur = clipDurationMs(clip);
+  const lower = clipIndex > 0 ? clipEndGlobalMs(clips, clipIndex - 1) : 0;
+  const upper = clipIndex < clips.length - 1
+    ? clipStartGlobalMs(clips, clipIndex + 1) - dur
+    : Number.POSITIVE_INFINITY;
+  // If neighbors leave no room, pin to the lower bound.
+  const hi = Number.isFinite(upper) ? Math.max(lower, upper) : Number.POSITIVE_INFINITY;
+  return Math.max(lower, Math.min(desiredStartMs, hi));
+}
+
+/**
+ * Push clips right in array order so none overlap (preserving any gaps that don't
+ * cause an overlap). Used after a reorder, where the new adjacency may collide.
+ */
+export function resolveClipOverlaps(clips: TimelineClip[]): TimelineClip[] {
+  let changed = false;
+  let cursor = 0;
+  const next = clips.map((clip, i) => {
+    const current = clipStartGlobalMs(clips, i);
+    const start = Math.max(current, cursor);
+    cursor = start + clipDurationMs(clip);
+    if (start !== clip.startGlobalMs) {
+      changed = true;
+      return { ...clip, startGlobalMs: start };
+    }
+    return clip;
+  });
+  return changed ? next : clips;
+}
+
 /** Furthest global ms occupied by any base clip. */
 export function timelineEndMs(clips: TimelineClip[]): number {
   let max = 0;

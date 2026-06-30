@@ -13,10 +13,10 @@
  * normalized in surprising ways for "special" custom schemes.)
  *
  * Examples:
- *   "C:\\Users\\zachr\\My Ride.mp4"
- *     → "local-media://media/?p=C%3A%5CUsers%5Czachr%5CMy%20Ride.mp4"
- *   "/Users/zachr/My Ride.mp4"
- *     → "local-media://media/?p=%2FUsers%2Fzachr%2FMy%20Ride.mp4"
+ *   "C:\\Users\\username\\My Ride.mp4"
+ *     → "local-media://media/?p=C%3A%5CUsers%5Cusername%5CMy%20Ride.mp4"
+ *   "/Users/username/My Ride.mp4"
+ *     → "local-media://media/?p=%2FUsers%2Fusername%2FMy%20Ride.mp4"
  */
 export function localMediaUrl(absolutePath: string): string {
   return `local-media://media/?p=${encodeURIComponent(absolutePath)}`;

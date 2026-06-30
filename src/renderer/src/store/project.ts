@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type {
   GaugeInstance,
   MediaSource,
+  PreviewProgress,
   Project,
   SyncAnchor,
   TelemetryTrack,
@@ -11,25 +12,25 @@ import type {
 } from '@shared/types';
 import {
   assignClipTimelinePositions,
+  clampClipStartGlobalMs,
   clipAtGlobalTime,
   clipDurationMs,
+  clipEndGlobalMs,
   clipInMs,
   clipOutMs,
   clipStartGlobalMs,
   globalTimeFromClipLocal,
   projectDurationMs,
+  resolveClipOverlaps,
   timelineEndMs,
 } from '@shared/timeline';
 import { frameAtGlobalTime } from '../lib/telemetry';
 import {
   computeOffsetFromAnchor,
   computeTimestampOverlayOffset,
-  defaultCameraTrackSync,
   defaultFitTrackSync,
   defaultFitTrackSyncForClip,
   effectiveSharedFitOffsetMs,
-  pickCameraTrack,
-  refreshClipSharedTrackSync,
   repairSharedFitSync,
   rechainedSharedFitSyncFrom,
   videoUtcMs,
@@ -87,12 +88,11 @@ function seedSharedSyncForClip(
   allClips: TimelineClip[],
   sharedTracks: TelemetryTrack[],
 ): TimelineClip {
-  const camera = pickCameraTrack(clip.localTracks);
   const sharedTrackSync = { ...clip.sharedTrackSync };
   for (const t of sharedTracks) {
     if (t.source !== 'fit') continue;
     if (!sharedTrackSync[t.id]) {
-      sharedTrackSync[t.id] = defaultFitTrackSyncForClip(allClips, clipIndex, t, camera);
+      sharedTrackSync[t.id] = defaultFitTrackSyncForClip(allClips, clipIndex, t);
     }
   }
   return { ...clip, sharedTrackSync };
@@ -149,6 +149,8 @@ interface ProjectState {
   trimInProgress: boolean;
   /** True while an ffmpeg preview build is in flight. */
   previewBuilding: boolean;
+  /** Live progress for the in-flight preview build. */
+  previewProgress: PreviewProgress | null;
   /** clipKey of the last successfully built preview concat. */
   lastPreviewClipKey: string;
   /** Incremented to trigger a manual preview rebuild from usePreviewVideo. */
@@ -160,7 +162,7 @@ interface ProjectState {
   setProjectFilePath(path: string | null): void;
   resetProject(): void;
 
-  addClip(media: MediaSource, localTracks?: TelemetryTrack[]): void;
+  addClip(media: MediaSource): void;
   removeClip(id: string): void;
   reorderClips(ids: string[]): void;
   selectClip(id: string | null): void;
@@ -173,6 +175,7 @@ interface ProjectState {
   beginTrim(): void;
   endTrim(): void;
   generatePreview(): void;
+  setPreviewProgress(progress: PreviewProgress | null): void;
   completePreviewBuild(clipKey: string): void;
   failPreviewBuild(): void;
   /** Split the clip under the global playhead into two clips. */
@@ -228,6 +231,7 @@ export const useProject = create<ProjectState>((set) => ({
   previewStale: false,
   trimInProgress: false,
   previewBuilding: false,
+  previewProgress: null,
   lastPreviewClipKey: '',
   previewGeneration: 0,
 
@@ -249,6 +253,7 @@ export const useProject = create<ProjectState>((set) => ({
       previewStale: false,
       trimInProgress: false,
       previewBuilding: false,
+      previewProgress: null,
       lastPreviewClipKey: '',
       previewGeneration: 0,
     });
@@ -267,22 +272,14 @@ export const useProject = create<ProjectState>((set) => ({
     previewStale: false,
     trimInProgress: false,
     previewBuilding: false,
+    previewProgress: null,
     lastPreviewClipKey: '',
     previewGeneration: 0,
   }),
 
-  addClip: (media, localTracks = []) => set((s) => {
+  addClip: (media) => set((s) => {
     const startGlobalMs = timelineEndMs(s.project.clips);
     let clip: TimelineClip = { ...emptyClip(media), startGlobalMs };
-    const localTrackSync: Record<string, import('@shared/types').TrackSyncSettings> = {};
-    for (const t of localTracks) {
-      if (t.source === 'fit') {
-        localTrackSync[t.id] = defaultFitTrackSync(media, t, pickCameraTrack(localTracks));
-      } else {
-        localTrackSync[t.id] = defaultCameraTrackSync();
-      }
-    }
-    clip = { ...clip, localTracks, localTrackSync };
     const clipIndex = s.project.clips.length;
     const allClips = [...s.project.clips, clip];
     clip = seedSharedSyncForClip(clip, clipIndex, allClips, s.project.sharedTracks);
@@ -296,7 +293,13 @@ export const useProject = create<ProjectState>((set) => ({
         updatedAt: new Date().toISOString(),
       },
       selectedClipId: s.selectedClipId ?? clip.id,
-      ...(markStale ? { previewStale: true, playing: false } : {}),
+      ...(markStale ? {
+        previewStale: true,
+        playing: false,
+        // Auto-rebuild when clips are added after a preview exists (e.g. multi-file
+        // import where the first clip's preview finishes before probing the next).
+        previewGeneration: s.previewGeneration + 1,
+      } : {}),
     };
   }),
 
@@ -318,8 +321,10 @@ export const useProject = create<ProjectState>((set) => ({
 
   reorderClips: (ids) => set((s) => {
     const byId = new Map(s.project.clips.map((c) => [c.id, c]));
-    const clips = ids.map((id) => byId.get(id)).filter((c): c is TimelineClip => c != null);
-    if (clips.length !== s.project.clips.length) return s;
+    const reordered = ids.map((id) => byId.get(id)).filter((c): c is TimelineClip => c != null);
+    if (reordered.length !== s.project.clips.length) return s;
+    // The new adjacency may overlap — push clips right to keep a clean track.
+    const clips = resolveClipOverlaps(reordered);
     return {
       project: { ...s.project, clips, updatedAt: new Date().toISOString() },
       previewStale: s.lastPreviewClipKey !== '' ? true : s.previewStale,
@@ -327,7 +332,20 @@ export const useProject = create<ProjectState>((set) => ({
     };
   }),
 
-  selectClip: (id) => set({ selectedClipId: id, selectedOverlayId: id ? null : useProject.getState().selectedOverlayId }),
+  selectClip: (id) => set((s) => {
+    const patch: Partial<ProjectState> = {
+      selectedClipId: id,
+      selectedOverlayId: id ? null : s.selectedOverlayId,
+    };
+    if (id) {
+      const clipIndex = s.project.clips.findIndex((c) => c.id === id);
+      if (clipIndex >= 0) {
+        patch.playhead = globalTimeFromClipLocal(s.project.clips, clipIndex, 0);
+        patch.playing = false;
+      }
+    }
+    return patch;
+  }),
 
   setClipTrim: (clipId, inMs, outMs) => set((s) => {
     const MIN_TRIM_MS = 100;
@@ -335,19 +353,40 @@ export const useProject = create<ProjectState>((set) => ({
     if (clipIndex < 0) return s;
     const target = s.project.clips[clipIndex]!;
     const dur = target.media.durationMs;
-    const nextIn = Math.max(0, Math.min(inMs, dur - MIN_TRIM_MS));
+    let nextIn = Math.max(0, Math.min(inMs, dur - MIN_TRIM_MS));
     const nextOut = Math.max(nextIn + MIN_TRIM_MS, Math.min(outMs, dur));
 
-    let clips = updateClip(s.project.clips, clipId, (c) => {
-      // Trimming only changes which source range of the video plays — it must not
-      // trim or shift the FIT telemetry. Keep the clip anchored at its existing
-      // global start so a head-trim slides its content to that start (no leading
-      // gap) instead of opening a telemetry gap where gauges would disappear. FIT
-      // is sampled against source time (clipInMs + localMs), so the FIT↔video sync
-      // is preserved and the shared FIT frames are never sliced.
-      const startGlobalMs = clipStartGlobalMs(s.project.clips, clipIndex);
-      return { ...c, inMs: nextIn, outMs: nextOut, startGlobalMs };
-    });
+    // The freed (or added) space must appear at the edge being trimmed:
+    //  - tail-trim (out changes): keep the start fixed, the end moves.
+    //  - head-trim (in changes): keep the end fixed, the start moves, so a gap
+    //    opens at the beginning instead of silently shrinking the clip's tail.
+    // FIT stays sampled against source time (clipInMs + localMs), so shifting the
+    // clip's global position does not desync telemetry.
+    const oldStart = clipStartGlobalMs(s.project.clips, clipIndex);
+    const oldEnd = oldStart + clipDurationMs(target);
+    const isHeadTrim = nextIn !== clipInMs(target);
+    let startGlobalMs = oldStart;
+    if (isHeadTrim) {
+      const lowerBound = clipIndex > 0 ? clipEndGlobalMs(s.project.clips, clipIndex - 1) : 0;
+      let nextStart = oldEnd - (nextOut - nextIn);
+      if (nextStart < lowerBound) {
+        // Not enough room to the left — cap the extension so we don't underflow
+        // the timeline or overlap the previous clip.
+        nextStart = lowerBound;
+        nextIn = Math.max(0, Math.min(nextOut - MIN_TRIM_MS, nextOut - (oldEnd - nextStart)));
+      }
+      startGlobalMs = nextStart;
+    }
+
+    let clips = updateClip(s.project.clips, clipId, (c) => ({
+      ...c,
+      inMs: nextIn,
+      outMs: nextOut,
+      startGlobalMs,
+    }));
+    // If lengthening the trim made this clip overlap later clips, ripple them
+    // further along the timeline so clips never overlap (gaps are preserved).
+    clips = resolveClipOverlaps(clips);
     clips = rechainAllSharedFit(clips, s.project.sharedTracks, clipIndex);
 
     const total = projectDurationMs(clips, s.project.overlays);
@@ -360,9 +399,13 @@ export const useProject = create<ProjectState>((set) => ({
   }),
 
   setClipStartGlobalMs: (clipId, startGlobalMs) => set((s) => {
+    const clipIndex = s.project.clips.findIndex((c) => c.id === clipId);
+    if (clipIndex < 0) return s;
+    // Confine the move to the free span between neighbors so clips never overlap.
+    const clamped = clampClipStartGlobalMs(s.project.clips, clipIndex, Math.max(0, startGlobalMs));
     const clips = updateClip(s.project.clips, clipId, (c) => ({
       ...c,
-      startGlobalMs: Math.max(0, startGlobalMs),
+      startGlobalMs: clamped,
     }));
     const total = projectDurationMs(clips, s.project.overlays);
     return {
@@ -386,17 +429,21 @@ export const useProject = create<ProjectState>((set) => ({
 
   generatePreview: () => set((s) => ({
     previewBuilding: true,
+    previewProgress: { phase: 'encoding', percent: 0, message: 'Preparing preview…' },
     previewGeneration: s.previewGeneration + 1,
     playing: false,
   })),
+
+  setPreviewProgress: (progress) => set({ previewProgress: progress }),
 
   completePreviewBuild: (clipKey) => set({
     lastPreviewClipKey: clipKey,
     previewStale: false,
     previewBuilding: false,
+    previewProgress: null,
   }),
 
-  failPreviewBuild: () => set({ previewBuilding: false }),
+  failPreviewBuild: () => set({ previewBuilding: false, previewProgress: null }),
 
   splitClipAtPlayhead: () => set((s) => {
     const loc = clipAtGlobalTime(s.project.clips, s.playhead);
@@ -617,10 +664,9 @@ export const useProject = create<ProjectState>((set) => ({
   addSharedTrack: (t) => set((s) => {
     const sharedTracks = [...s.project.sharedTracks, t];
     const clips = s.project.clips.map((clip, clipIndex) => {
-      const camera = pickCameraTrack(clip.localTracks);
       const sharedTrackSync = {
         ...clip.sharedTrackSync,
-        [t.id]: defaultFitTrackSyncForClip(s.project.clips, clipIndex, t, camera),
+        [t.id]: defaultFitTrackSyncForClip(s.project.clips, clipIndex, t),
       };
       return { ...clip, sharedTrackSync };
     });
@@ -652,27 +698,10 @@ export const useProject = create<ProjectState>((set) => ({
   addClipLocalTrack: (clipId, t) => set((s) => {
     let clips = updateClip(s.project.clips, clipId, (clip) => {
       const localTracks = [...clip.localTracks, t];
-      const camera = pickCameraTrack(localTracks);
-      const localTrackSync = { ...clip.localTrackSync };
-
-      if (t.source === 'fit') {
-        localTrackSync[t.id] = defaultFitTrackSync(clip.media, t, camera);
-      } else {
-        localTrackSync[t.id] = defaultCameraTrackSync();
-        if (camera && t.id === camera.id) {
-          const clipIndex = s.project.clips.findIndex((c) => c.id === clipId);
-          const sharedTrackSync = refreshClipSharedTrackSync(
-            clip.sharedTrackSync,
-            s.project.sharedTracks,
-            clip.media,
-            localTracks,
-            clipIndex >= 0 ? clipIndex : undefined,
-            s.project.clips,
-          );
-          return { ...clip, localTracks, localTrackSync, sharedTrackSync };
-        }
-      }
-
+      const localTrackSync = {
+        ...clip.localTrackSync,
+        [t.id]: defaultFitTrackSync(clip.media, t),
+      };
       return { ...clip, localTracks, localTrackSync };
     });
     clips = repairSharedFitSync(clips, s.project.sharedTracks);
@@ -735,13 +764,12 @@ export const useProject = create<ProjectState>((set) => ({
 
     const clips = updateClip(s.project.clips, clipId, (clip) => {
       const prev = clip[syncKey][trackId];
-      const camera = pickCameraTrack(clip.localTracks);
       const clipIndex = s.project.clips.findIndex((c) => c.id === clipId);
       const offsetMs = anchor === 'manual'
         ? (prev?.offsetMs ?? 0)
         : anchor === 'utc' && track.source === 'fit' && clipIndex >= 0
-          ? defaultFitTrackSyncForClip(s.project.clips, clipIndex, track, camera).offsetMs
-          : computeOffsetFromAnchor(anchor, clip.media, track, camera);
+          ? defaultFitTrackSyncForClip(s.project.clips, clipIndex, track).offsetMs
+          : computeOffsetFromAnchor(anchor, clip.media, track);
       return {
         ...clip,
         [syncKey]: {

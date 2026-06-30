@@ -1,7 +1,6 @@
 import { useCallback } from 'react';
 import { useProject } from '../store/project';
 import { roundExportFps } from '@shared/types';
-import type { TelemetryTrack } from '@shared/types';
 
 /**
  * Shared media-import actions used by the Edit workspace (add clip, load FIT).
@@ -40,16 +39,7 @@ export function useMediaImport() {
           fps: probe.fps,
           creationTime: probe.creationTime,
         };
-        let localTracks: TelemetryTrack[] = [];
-        if (probe.cameraExtractorId) {
-          setBusyMessage(`Extracting ${probe.detectedBrand ?? 'camera'} telemetry${progress}…`);
-          try {
-            localTracks = [await window.api.extractCameraTelemetry(path)];
-          } catch (e) {
-            alert(`Telemetry extraction failed for ${media.filename}: ${(e as Error).message}`);
-          }
-        }
-        addClip(media, localTracks);
+        addClip(media);
         if (setExportFps) {
           setExport({ fps: roundExportFps(probe.fps) });
           setExportFps = false;

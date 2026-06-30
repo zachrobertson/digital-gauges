@@ -12,9 +12,9 @@ import {
   fitOffsetSliderRange,
   formatOffsetMs,
   offsetFromSyncPoint,
-  pickCameraTrack,
   SYNC_ANCHOR_LABELS,
   trackOffsetMs,
+  videoUtcMs,
 } from '@shared/sync';
 import { fitSampleTimeAtGlobalMs } from '../../lib/telemetry';
 import { clipSyncStatus, clipSyncStatusDisplay } from '../../lib/syncStatus';
@@ -78,10 +78,7 @@ export function SyncControlsPanel({ linkLocked, onLinkLockedChange }: Props) {
     );
   }
 
-  const cameraTrack = pickCameraTrack(selectedClip.localTracks);
-  const gpsAvailable = Boolean(
-    cameraTrack?.fields.includes('lat') && cameraTrack?.fields.includes('lon'),
-  );
+  const utcAvailable = videoUtcMs(selectedClip.media) != null;
   const localFit = selectedClip.localTracks.find((t) => t.source === 'fit');
   const sharedFit = sharedTracks.find((t) => t.source === 'fit');
   const fitTrack = localFit ?? sharedFit;
@@ -132,7 +129,7 @@ export function SyncControlsPanel({ linkLocked, onLinkLockedChange }: Props) {
   const status = clipSyncStatus(selectedClip, selectedClipIndex, project);
   const statusDisplay = clipSyncStatusDisplay(status);
 
-  const autoAlignGps = () => {
+  const autoAlignUtc = () => {
     if (!fitTrack) return;
     setClipTrackAnchor(selectedClip.id, fitTrack.id, 'utc', fitScope);
   };
@@ -203,18 +200,18 @@ export function SyncControlsPanel({ linkLocked, onLinkLockedChange }: Props) {
 
       <div className="h-px bg-white/[0.07]" />
 
-      {/* GPS auto-align */}
+      {/* UTC auto-align */}
       <div>
-        <div className="field-label mb-2">GPS auto-align</div>
-        {fitTrack && gpsAvailable ? (
-          <button type="button" className="btn-elevated text-xs w-full" onClick={autoAlignGps}>
-            Auto-align via GPS
+        <div className="field-label mb-2">UTC auto-align</div>
+        {fitTrack && utcAvailable ? (
+          <button type="button" className="btn-elevated text-xs w-full" onClick={autoAlignUtc}>
+            Auto-align via UTC
           </button>
         ) : (
           <div className="rounded-[9px] bg-bg border border-dashed border-white/[0.16] p-3">
             <p className="text-[11px] text-textfaint leading-relaxed">
               {fitTrack
-                ? 'Unavailable — this clip has no GPS track to correlate. Use visual sync below.'
+                ? 'Unavailable — this clip has no container timestamp to align to. Use visual sync below.'
                 : 'Load a FIT file in Edit mode to align telemetry to the footage.'}
             </p>
           </div>

@@ -9,6 +9,20 @@ export type { GaugeTemplateFile, GaugeTemplateSummary };
  * through these channels. The preload script exposes a typed `api`
  * object that maps 1:1 to this interface.
  */
+export type PreviewProgressPhase = 'probing' | 'encoding' | 'concat' | 'done';
+
+export interface PreviewProgress {
+  phase: PreviewProgressPhase;
+  /** Overall completion, 0–100. */
+  percent: number;
+  /** 0-based clip index during the encoding phase. */
+  clipIndex?: number;
+  clipCount?: number;
+  /** Progress within the current clip encode, 0–100. */
+  clipPercent?: number;
+  message: string;
+}
+
 export interface DigitalGaugesApi {
   pickVideoFile(): Promise<string[]>;
   pickFitFile(): Promise<string | null>;
@@ -17,7 +31,6 @@ export interface DigitalGaugesApi {
   pickProjectSavePath(defaultName: string): Promise<string | null>;
 
   probeVideo(path: string): Promise<VideoProbe>;
-  extractCameraTelemetry(path: string): Promise<TelemetryTrack>;
   parseFitFile(path: string): Promise<TelemetryTrack>;
 
   saveProject(path: string, project: Project): Promise<void>;
@@ -39,8 +52,11 @@ export interface DigitalGaugesApi {
   sendExportFrame(jobId: string, frame: ArrayBuffer): Promise<void>;
   finishExportFrames(jobId: string): Promise<void>;
 
-  /** Build one preview file (trim + concat as needed) for playback. */
-  buildPreviewVideo(segments: PreviewSegment[]): Promise<{ path: string }>;
+  /** Build one preview file (trim + concat as needed) for playback. `cancelled` is set when superseded. */
+  buildPreviewVideo(segments: PreviewSegment[]): Promise<{ path: string; cancelled?: boolean }>;
+  /** Abort the in-flight preview build (e.g. when the timeline changed mid-build). */
+  cancelPreviewBuild(): Promise<void>;
+  onPreviewProgress(handler: (p: PreviewProgress) => void): () => void;
 
   listUserPlugins(): Promise<UserPluginInfo[]>;
   openUserPluginsFolder(): Promise<void>;
@@ -72,7 +88,6 @@ export interface VideoProbe {
   /** ISO 8601 UTC from container creation_time, when present. */
   creationTime?: string;
   detectedBrand: string | null;
-  cameraExtractorId: string | null;
   rawProbe: unknown;
 }
 

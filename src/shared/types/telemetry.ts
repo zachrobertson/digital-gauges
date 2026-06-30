@@ -1,7 +1,10 @@
 /**
- * Unified telemetry data model — used across IPC boundaries for both
- * camera-side telemetry (GoPro, Insta360, DJI, Sony, CAMM) and
- * bike-computer telemetry (FIT files).
+ * Telemetry data model — bike-computer telemetry from FIT files is the
+ * sole data source. Video files are used for picture and timing only;
+ * the app no longer extracts telemetry from video.
+ *
+ * The legacy camera source literals below are retained only so older
+ * saved projects still parse; such tracks are stripped on project load.
  *
  * All numeric units are SI:
  *   - speed:  m/s
