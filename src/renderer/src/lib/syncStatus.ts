@@ -1,11 +1,11 @@
 import type { Project, TimelineClip } from '@shared/types';
-import { pickCameraTrack } from '@shared/sync';
+import { videoUtcMs } from '@shared/sync';
 
 export type ClipSyncStatus =
   | 'auto-utc'
   | 'manual'
   | 'missing-fit'
-  | 'visual-only';
+  | 'needs-manual';
 
 export interface ClipSyncStatusDisplay {
   label: string;
@@ -29,8 +29,8 @@ const STATUS_DISPLAY: Record<ClipSyncStatus, ClipSyncStatusDisplay> = {
     background: 'rgba(245,113,113,0.12)',
     color: '#f87171',
   },
-  'visual-only': {
-    label: 'Visual only (no GPS)',
+  'needs-manual': {
+    label: 'Needs manual sync',
     background: 'rgba(245,177,74,0.12)',
     color: '#f5b14a',
   },
@@ -56,16 +56,12 @@ export function clipSyncStatus(
   const { track: fitTrack, scope } = findFitTrack(clip, project);
   if (!fitTrack) return 'missing-fit';
 
-  const cameraTrack = pickCameraTrack(clip.localTracks);
-  const hasGps = Boolean(
-    cameraTrack?.fields.includes('lat') && cameraTrack?.fields.includes('lon'),
-  );
-  if (!hasGps) return 'visual-only';
-
   const sync = scope === 'local'
     ? clip.localTrackSync[fitTrack.id]
     : clip.sharedTrackSync[fitTrack.id];
   if (sync?.anchor === 'manual') return 'manual';
+
+  if (videoUtcMs(clip.media) == null) return 'needs-manual';
 
   return 'auto-utc';
 }

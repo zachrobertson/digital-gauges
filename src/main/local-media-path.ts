@@ -7,7 +7,7 @@ import { normalize } from 'node:path';
  * often rewrites that to a path-style URL on follow-up requests (especially
  * byte-range reads during playback):
  *
- *   local-media:///C%3A%5CUsers%5Czachr%5Cvideo.MP4
+ *   local-media:///C%3A%5CUsers%5Cusername%5Cvideo.MP4
  */
 export function resolveLocalMediaPath(requestUrl: string): string {
   const url = new URL(requestUrl);

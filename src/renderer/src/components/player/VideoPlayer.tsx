@@ -15,7 +15,8 @@ import { VideoOverlayLayer } from './VideoOverlayLayer';
 import { useVideoGaugeDrag, videoGaugeDragActive } from './useVideoGaugeDrag';
 import { useVideoOverlayDrag, videoOverlayDragActive } from './useVideoOverlayDrag';
 import { localMediaUrl } from '../../lib/paths';
-import { usePreviewVideo } from '../../lib/usePreviewVideo';
+import { usePreviewVideoState } from '../../lib/PreviewVideoProvider';
+import { PreviewProgressBar } from '../PreviewProgressBar';
 
 /** Native `<video controls>` chrome height — interaction layer must not cover this strip. */
 const VIDEO_CONTROL_BAR_H = 48;
@@ -41,32 +42,118 @@ export function VideoPlayer({ editable = true }: { editable?: boolean } = {}) {
   const previewStale = useProject((s) => s.previewStale);
   const trimInProgress = useProject((s) => s.trimInProgress);
   const previewBuilding = useProject((s) => s.previewBuilding);
+  const previewProgress = useProject((s) => s.previewProgress);
   const previewFrozen = previewStale || trimInProgress || previewBuilding;
-  const { previewPath, loading: previewLoading, error: previewError } = usePreviewVideo(clips);
+  const { previewPath, loading: previewLoading, error: previewError } = usePreviewVideoState();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const srcRef = useRef<string | null>(null);
   const seekingRef = useRef(false);
+  /** Who initiated the current seek — external timeline scrub vs native video controls. */
+  const seekSourceRef = useRef<'external' | 'video' | null>(null);
+  /** Latest global ms requested by timeline scrub — applied after in-flight seeks finish. */
+  const pendingSeekGlobalMsRef = useRef<number | null>(null);
+  const scrubSeekRafRef = useRef(0);
   const lastVideoGlobalMsRef = useRef(0);
   const previewDurationSecRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [mediaReady, setMediaReady] = useState(false);
   const [box, setBox] = useState<{ w: number; h: number; left: number; top: number }>({
     w: 0, h: 0, left: 0, top: 0,
   });
 
   const syncPlayheadFromVideo = useCallback(() => {
     const el = videoRef.current;
-    if (!el || seekingRef.current || previewFrozen) return;
+    if (!el || previewFrozen) return;
+    // While the timeline is driving the video to a pending target, don't pull playhead back.
+    if (seekSourceRef.current === 'external' && pendingSeekGlobalMsRef.current != null) return;
     const previewDur = previewDurationSecRef.current > 0
       ? previewDurationSecRef.current
       : (el.duration || totalDurationMs(clips) / 1000);
     const globalMs = previewTimeToGlobalMs(el.currentTime, previewDur, clips);
     lastVideoGlobalMsRef.current = globalMs;
     const prev = useProject.getState().playhead;
-    if (Math.abs(globalMs - prev) >= 25) {
+    const paused = !useProject.getState().playing;
+    if (paused || Math.abs(globalMs - prev) >= 25) {
       setPlayhead(globalMs);
     }
   }, [clips, previewFrozen, setPlayhead]);
+
+  const previewDurationSec = useCallback((el: HTMLVideoElement) => (
+    previewDurationSecRef.current > 0
+      ? previewDurationSecRef.current
+      : (el.duration || totalDurationMs(clips) / 1000)
+  ), [clips]);
+
+  /** Seek the preview file to a global timeline position while paused/scrubbing. */
+  const seekVideoToGlobalMs = useCallback((globalMs: number) => {
+    const el = videoRef.current;
+    if (!el || !previewPath || previewFrozen || logicalTotalMs <= 0) return;
+    if (useProject.getState().playing) return;
+
+    const clampedMs = Math.min(Math.max(0, globalMs), logicalTotalMs);
+    seekSourceRef.current = 'external';
+    pendingSeekGlobalMsRef.current = clampedMs;
+
+    const targetSec = globalMsToPreviewTimeSec(
+      clampedMs,
+      previewDurationSec(el),
+      clips,
+    );
+    if (Math.abs(el.currentTime - targetSec) <= 0.05) {
+      pendingSeekGlobalMsRef.current = null;
+      seekSourceRef.current = null;
+      lastVideoGlobalMsRef.current = clampedMs;
+      seekingRef.current = false;
+      return;
+    }
+
+    seekingRef.current = true;
+    el.currentTime = targetSec;
+  }, [clips, logicalTotalMs, previewDurationSec, previewFrozen, previewPath]);
+
+  const finishPendingSeek = useCallback(() => {
+    const el = videoRef.current;
+    if (!el) {
+      seekingRef.current = false;
+      seekSourceRef.current = null;
+      return;
+    }
+
+    if (seekSourceRef.current === 'external' && pendingSeekGlobalMsRef.current != null) {
+      if (useProject.getState().playing) {
+        pendingSeekGlobalMsRef.current = null;
+        seekSourceRef.current = null;
+        seekingRef.current = false;
+        syncPlayheadFromVideo();
+        return;
+      }
+
+      const pending = pendingSeekGlobalMsRef.current;
+      const targetSec = globalMsToPreviewTimeSec(
+        pending,
+        previewDurationSec(el),
+        clips,
+      );
+      if (Math.abs(el.currentTime - targetSec) > 0.05) {
+        seekingRef.current = true;
+        el.currentTime = targetSec;
+        return;
+      }
+
+      pendingSeekGlobalMsRef.current = null;
+      seekSourceRef.current = null;
+      lastVideoGlobalMsRef.current = pending;
+      seekingRef.current = false;
+      return;
+    }
+
+    // Native video scrub or playback seek — mirror clock to global playhead.
+    seekSourceRef.current = null;
+    pendingSeekGlobalMsRef.current = null;
+    seekingRef.current = false;
+    syncPlayheadFromVideo();
+  }, [clips, previewDurationSec, syncPlayheadFromVideo]);
 
   const togglePlayback = useCallback(() => {
     const el = videoRef.current;
@@ -154,6 +241,7 @@ export function VideoPlayer({ editable = true }: { editable?: boolean } = {}) {
     if (!el) return;
 
     if (!previewPath) {
+      setMediaReady(false);
       el.pause();
       if (srcRef.current) {
         srcRef.current = null;
@@ -166,6 +254,7 @@ export function VideoPlayer({ editable = true }: { editable?: boolean } = {}) {
     const nextSrc = localMediaUrl(previewPath);
     if (srcRef.current === nextSrc) return;
 
+    setMediaReady(false);
     seekingRef.current = true;
     srcRef.current = nextSrc;
     const resumePlayhead = useProject.getState().playhead;
@@ -174,40 +263,39 @@ export function VideoPlayer({ editable = true }: { editable?: boolean } = {}) {
 
     const onLoaded = () => {
       previewDurationSecRef.current = el.duration || logicalTotalMs / 1000;
-      const targetSec = globalMsToPreviewTimeSec(
-        resumePlayhead,
-        previewDurationSecRef.current,
-        clips,
-      );
-      el.currentTime = targetSec;
       seekingRef.current = false;
-      syncPlayheadFromVideo();
-      el.removeEventListener('loadedmetadata', onLoaded);
+      seekSourceRef.current = null;
+      pendingSeekGlobalMsRef.current = null;
+      setMediaReady(true);
+      seekVideoToGlobalMs(resumePlayhead);
     };
-    el.addEventListener('loadedmetadata', onLoaded);
-  }, [previewPath, clips, syncPlayheadFromVideo]);
+    const onLoadError = () => {
+      seekingRef.current = false;
+      setMediaReady(false);
+    };
 
-  // Seek preview video when playhead changes externally (timeline, etc.) — not while playing.
+    el.addEventListener('loadedmetadata', onLoaded);
+    el.addEventListener('error', onLoadError, { once: true });
+    return () => {
+      el.removeEventListener('loadedmetadata', onLoaded);
+      el.removeEventListener('error', onLoadError);
+    };
+  }, [previewPath, clips, logicalTotalMs, seekVideoToGlobalMs]);
+
+  // Seek preview video when playhead changes externally (timeline scrub, etc.).
   useEffect(() => {
-    const el = videoRef.current;
-    if (!el || !previewPath || seekingRef.current || previewFrozen || logicalTotalMs <= 0) return;
+    if (!previewPath || previewFrozen || logicalTotalMs <= 0) return;
     if (useProject.getState().playing) return;
+    // Playhead was just updated from native video scrub — don't seek the video back.
+    if (seekSourceRef.current === 'video') return;
     if (Math.abs(playhead - lastVideoGlobalMsRef.current) < 30) return;
 
-    const previewDur = previewDurationSecRef.current > 0
-      ? previewDurationSecRef.current
-      : (el.duration || totalDurationMs(clips) / 1000);
-    const targetSec = globalMsToPreviewTimeSec(
-      Math.min(playhead, logicalTotalMs),
-      previewDur,
-      clips,
-    );
-    if (Math.abs(el.currentTime - targetSec) > 0.05) {
-      seekingRef.current = true;
-      el.currentTime = targetSec;
-    }
-    lastVideoGlobalMsRef.current = playhead;
-  }, [playhead, previewPath, logicalTotalMs, previewFrozen, clips]);
+    cancelAnimationFrame(scrubSeekRafRef.current);
+    scrubSeekRafRef.current = requestAnimationFrame(() => {
+      seekVideoToGlobalMs(playhead);
+    });
+    return () => cancelAnimationFrame(scrubSeekRafRef.current);
+  }, [playhead, previewPath, logicalTotalMs, previewFrozen, seekVideoToGlobalMs]);
 
   // Mirror preview clock → global playhead while the video is active (throttled in syncPlayheadFromVideo).
   useEffect(() => {
@@ -239,7 +327,7 @@ export function VideoPlayer({ editable = true }: { editable?: boolean } = {}) {
   // Drive the preview <video> from the global transport's play/pause state.
   useEffect(() => {
     const el = videoRef.current;
-    if (!el || !previewPath || previewLoading) return;
+    if (!el || !previewPath || previewLoading || !mediaReady) return;
     if (previewFrozen) {
       if (!el.paused) el.pause();
       return;
@@ -249,7 +337,7 @@ export function VideoPlayer({ editable = true }: { editable?: boolean } = {}) {
     } else if (!playing && !el.paused) {
       el.pause();
     }
-  }, [playing, previewPath, previewLoading, previewFrozen]);
+  }, [playing, previewPath, previewLoading, previewFrozen, mediaReady]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -264,11 +352,20 @@ export function VideoPlayer({ editable = true }: { editable?: boolean } = {}) {
       setPlaying(true);
     };
     const onPause = () => setPlaying(false);
-    const onSeeked = () => {
-      seekingRef.current = false;
+    const onSeeked = () => finishPendingSeek();
+    const onSeeking = () => {
+      seekingRef.current = true;
+      // Native control scrub — don't treat as an external timeline-driven seek.
+      if (seekSourceRef.current !== 'external') {
+        seekSourceRef.current = 'video';
+        pendingSeekGlobalMsRef.current = null;
+      }
+    };
+    const onTimeUpdate = () => {
+      if (useProject.getState().playing) return;
+      if (seekSourceRef.current === 'external' && pendingSeekGlobalMsRef.current != null) return;
       syncPlayheadFromVideo();
     };
-    const onSeeking = () => { seekingRef.current = true; };
     const onEnded = () => setPlaying(false);
     const onError = () => {
       const err = el.error;
@@ -279,6 +376,7 @@ export function VideoPlayer({ editable = true }: { editable?: boolean } = {}) {
     el.addEventListener('pause', onPause);
     el.addEventListener('seeked', onSeeked);
     el.addEventListener('seeking', onSeeking);
+    el.addEventListener('timeupdate', onTimeUpdate);
     el.addEventListener('ended', onEnded);
     el.addEventListener('error', onError);
     return () => {
@@ -286,10 +384,11 @@ export function VideoPlayer({ editable = true }: { editable?: boolean } = {}) {
       el.removeEventListener('pause', onPause);
       el.removeEventListener('seeked', onSeeked);
       el.removeEventListener('seeking', onSeeking);
+      el.removeEventListener('timeupdate', onTimeUpdate);
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('error', onError);
     };
-  }, [setPlaying, syncPlayheadFromVideo]);
+  }, [setPlaying, finishPendingSeek, syncPlayheadFromVideo]);
 
   if (clips.length === 0) {
     return (
@@ -312,23 +411,29 @@ export function VideoPlayer({ editable = true }: { editable?: boolean } = {}) {
 
   const frozenMessage = trimInProgress
     ? 'Trim in progress — preview paused'
-    : previewBuilding
-      ? 'Building preview…'
-      : previewStale
-        ? 'Preview out of date — click Generate Preview'
-        : null;
+    : previewStale
+      ? 'Preview out of date — click Generate Preview'
+      : null;
+
+  const showPreviewProgress = (previewBuilding || previewLoading) && previewProgress;
 
   return (
     <div ref={containerRef} className="relative flex-1 min-h-0 h-full w-full bg-black">
-      {previewLoading && !previewFrozen && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-black/75 text-white/60">
-          <div className="text-sm">Building preview…</div>
-          <div className="text-xs text-white/40">
-            {previewPath ? 'Updating preview…' : 'Concatenating clips for playback'}
-          </div>
+      {(previewLoading || previewBuilding) && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/75 text-white/60 px-6">
+          {showPreviewProgress ? (
+            <PreviewProgressBar progress={previewProgress} />
+          ) : (
+            <>
+              <div className="text-sm">Building preview…</div>
+              <div className="text-xs text-white/40">
+                {previewPath ? 'Updating preview…' : 'Concatenating clips for playback'}
+              </div>
+            </>
+          )}
         </div>
       )}
-      {frozenMessage && (
+      {frozenMessage && !previewBuilding && !previewLoading && (
         <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
           <div className="px-4 py-2 rounded-lg bg-black/80 border border-white/10 text-sm text-white/70">
             {frozenMessage}

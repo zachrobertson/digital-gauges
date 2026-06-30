@@ -111,9 +111,16 @@ function normalizeClip(raw: unknown): TimelineClip | null {
   const c = raw as TimelineClip;
   const media = normalizeMediaSource(c.media);
   if (!media) return null;
+  // Video telemetry was removed: keep only FIT local tracks; legacy camera
+  // tracks from older projects are discarded.
+  const localTracks = (Array.isArray(c.localTracks) ? c.localTracks : []).filter(
+    (t) => t.source === 'fit',
+  );
+  const keptTrackIds = new Set(localTracks.map((t) => t.id));
   const localTrackSync: Record<string, TrackSyncSettings> = {};
   if (c.localTrackSync && typeof c.localTrackSync === 'object') {
     for (const [id, sync] of Object.entries(c.localTrackSync)) {
+      if (!keptTrackIds.has(id)) continue;
       localTrackSync[id] = normalizeTrackSyncEntry(sync);
     }
   }
@@ -134,7 +141,7 @@ function normalizeClip(raw: unknown): TimelineClip | null {
   return {
     id: typeof c.id === 'string' ? c.id : crypto.randomUUID(),
     media,
-    localTracks: Array.isArray(c.localTracks) ? c.localTracks : [],
+    localTracks,
     localTrackSync,
     sharedTrackSync,
     inMs,
@@ -215,14 +222,12 @@ function migrateV1ToV2(raw: Record<string, unknown>): Omit<Project, 'export'> & 
   const localTrackSync: Record<string, TrackSyncSettings> = {};
   const sharedTrackSync: Record<string, TrackSyncSettings> = {};
 
+  // Video telemetry was removed: only FIT tracks survive migration; legacy
+  // camera tracks are discarded.
   for (const t of tracks) {
-    if (t.source === 'fit') {
-      sharedTracks.push(t);
-      if (trackSync[t.id]) sharedTrackSync[t.id] = trackSync[t.id]!;
-    } else {
-      localTracks.push(t);
-      if (trackSync[t.id]) localTrackSync[t.id] = trackSync[t.id]!;
-    }
+    if (t.source !== 'fit') continue;
+    sharedTracks.push(t);
+    if (trackSync[t.id]) sharedTrackSync[t.id] = trackSync[t.id]!;
   }
 
   const clips: TimelineClip[] = video

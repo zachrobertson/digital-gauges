@@ -226,7 +226,7 @@ export function Timeline({ linkLocked }: TimelineProps) {
     : 0;
 
   return (
-    <div className="panel border-t flex flex-col flex-1 min-h-0 overflow-hidden">
+    <div className="panel border-t flex flex-col flex-1 min-h-[340px] overflow-x-hidden">
       <SyncPlayheadBar clips={project.clips} selectedClip={selectedClip} fitTrackId={fitTrack?.id} />
       <GlobalTimelineRuler clips={project.clips} />
       <SyncMapPreview />

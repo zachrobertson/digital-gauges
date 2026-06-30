@@ -1,6 +1,6 @@
 import { extname } from 'node:path';
 import { CameraExtractor, DetectionResult } from './base';
-import { ffprobe, FfprobeResult } from './ffprobe';
+import { ffprobe, extractBrandLabel, FfprobeResult } from './ffprobe';
 import { GoProExtractor } from './gopro';
 import { Insta360Extractor } from './insta360';
 import { DJIExtractor } from './dji';
@@ -85,17 +85,4 @@ export async function detectCamera(filePath: string): Promise<DetectionResult> {
     rawProbe: probe,
     reason: 'No registered extractor matched',
   };
-}
-
-export function extractBrandLabel(probe: FfprobeResult): string | null {
-  const make = probe.format?.tags?.['com.apple.quicktime.make']
-    ?? probe.format?.tags?.['make']
-    ?? probe.format?.tags?.['MAKE'];
-  const model = probe.format?.tags?.['com.apple.quicktime.model']
-    ?? probe.format?.tags?.['model']
-    ?? probe.format?.tags?.['MODEL'];
-  if (make && model) return `${make} ${model}`;
-  if (make) return make;
-  if (model) return model;
-  return null;
 }

@@ -1,8 +1,6 @@
 import { BrowserWindow, ipcMain, dialog } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
-import { basename } from 'node:path';
-import { detectCamera } from '../extractors/detector';
-import { ffprobe, parseFps, pickVideoStream, probeCreationTime, probeDurationMs } from '../extractors/ffprobe';
+import { extractBrandLabel, ffprobe, parseFps, pickVideoStream, probeCreationTime, probeDurationMs } from '../extractors/ffprobe';
 import { parseFitFile } from '../extractors/fit';
 import {
   cancelExport,
@@ -12,7 +10,7 @@ import {
   startExportSegment,
   writeExportFrame,
 } from '../export/ffmpeg';
-import { buildPreviewVideo } from '../preview/concat';
+import { buildPreviewVideo, isPreviewAbortError } from '../preview/concat';
 import {
   listLoadedPlugins,
   openPluginsFolder,
@@ -38,10 +36,14 @@ import type {
   ExportProgress,
   ExportResult,
   GaugeTemplateFile,
+  PreviewProgress,
   Project,
   TelemetryTrack,
   VideoProbe,
 } from '../../shared/types';
+
+/** Aborts the currently in-flight preview build so a superseding build can take over. */
+let previewBuildAbort: AbortController | null = null;
 
 export function registerIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('dialog:pickVideo', async () => {
@@ -99,7 +101,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('video:probe', async (_e, path: string): Promise<VideoProbe> => {
     const probe = await ffprobe(path).catch(() => null);
-    const det = await detectCamera(path);
 
     const videoStream = probe ? pickVideoStream(probe) : null;
     const durationMs = probe ? probeDurationMs(probe) : 0;
@@ -111,20 +112,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       durationMs,
       fps: parseFps(videoStream?.avg_frame_rate ?? videoStream?.r_frame_rate),
       creationTime: probe ? probeCreationTime(probe) : undefined,
-      detectedBrand: det.brand,
-      cameraExtractorId: det.extractor?.id ?? null,
+      detectedBrand: probe ? extractBrandLabel(probe) : null,
       rawProbe: probe,
     };
-  });
-
-  ipcMain.handle('telemetry:extractCamera', async (_e, path: string): Promise<TelemetryTrack> => {
-    const det = await detectCamera(path);
-    if (!det.extractor) {
-      throw new Error(
-        `No supported camera telemetry found in ${basename(path)}. ${det.reason}`,
-      );
-    }
-    return det.extractor.extract(path);
   });
 
   ipcMain.handle('telemetry:parseFit', async (_e, path: string): Promise<TelemetryTrack> => {
@@ -205,8 +195,32 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   });
 
   ipcMain.handle('preview:build', async (_e, segments: import('../../shared/types/ipc').PreviewSegment[]) => {
-    const path = await buildPreviewVideo(segments);
-    return { path };
+    // Supersede any in-flight preview build — abort it so its ffmpeg is killed
+    // instead of running to completion for a now-stale timeline.
+    previewBuildAbort?.abort();
+    const controller = new AbortController();
+    previewBuildAbort = controller;
+    const win = getWindow();
+    const onProgress = (progress: PreviewProgress): void => {
+      if (!win || win.isDestroyed()) return;
+      win.webContents.send('preview:progress', progress);
+    };
+    try {
+      const path = await buildPreviewVideo(segments, { signal: controller.signal, onProgress });
+      return { path };
+    } catch (err) {
+      // A superseded/cancelled build is expected, not a failure — report it as
+      // cancelled instead of surfacing it as an unhandled handler error.
+      if (isPreviewAbortError(err)) return { path: '', cancelled: true };
+      throw err;
+    } finally {
+      if (previewBuildAbort === controller) previewBuildAbort = null;
+    }
+  });
+
+  ipcMain.handle('preview:cancel', async () => {
+    previewBuildAbort?.abort();
+    previewBuildAbort = null;
   });
 
   ipcMain.handle('plugins:list', () => listLoadedPlugins());

@@ -3,21 +3,13 @@ import { createReadStream } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import ffmpegPath from 'ffmpeg-static';
+import { FFMPEG_BIN } from '../ffmpeg-binaries';
 import { CameraExtractor } from './base';
 import { ffprobe, FfprobeResult, pickDataStreams } from './ffprobe';
 import type { TelemetryTrack } from '../../shared/types';
 import { emptyTrack, finalizeTrack, pushFrame } from './util';
 
 const GPMF_STREAM_CHUNK_BYTES = 4 * 1024 * 1024;
-
-const FFMPEG_BIN: string = ((): string => {
-  if (typeof ffmpegPath === 'string') return ffmpegPath;
-  if (ffmpegPath && typeof (ffmpegPath as { path?: string }).path === 'string') {
-    return (ffmpegPath as { path: string }).path;
-  }
-  throw new Error('Could not resolve ffmpeg-static binary path.');
-})();
 
 interface GpmfExtractResult {
   rawData: Buffer;

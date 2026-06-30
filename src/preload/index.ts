@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { DigitalGaugesApi, ExportProgress, ExportResult, UserPluginInfo } from '../shared/types';
+import type { DigitalGaugesApi, ExportProgress, ExportResult, PreviewProgress, UserPluginInfo } from '../shared/types';
 
 const api: DigitalGaugesApi = {
   pickVideoFile: () => ipcRenderer.invoke('dialog:pickVideo'),
@@ -9,7 +9,6 @@ const api: DigitalGaugesApi = {
   pickProjectSavePath: (defaultName) => ipcRenderer.invoke('dialog:pickProjectSave', defaultName),
 
   probeVideo: (path) => ipcRenderer.invoke('video:probe', path),
-  extractCameraTelemetry: (path) => ipcRenderer.invoke('telemetry:extractCamera', path),
   parseFitFile: (path) => ipcRenderer.invoke('telemetry:parseFit', path),
 
   saveProject: (path, project) => ipcRenderer.invoke('project:save', path, project),
@@ -38,6 +37,12 @@ const api: DigitalGaugesApi = {
   finishExportFrames: (jobId) => ipcRenderer.invoke('export:finish', jobId),
 
   buildPreviewVideo: (segments) => ipcRenderer.invoke('preview:build', segments),
+  cancelPreviewBuild: () => ipcRenderer.invoke('preview:cancel'),
+  onPreviewProgress: (handler) => {
+    const listener = (_: unknown, p: PreviewProgress) => handler(p);
+    ipcRenderer.on('preview:progress', listener);
+    return () => ipcRenderer.off('preview:progress', listener);
+  },
 
   listUserPlugins: () => ipcRenderer.invoke('plugins:list'),
   openUserPluginsFolder: () => ipcRenderer.invoke('plugins:openFolder'),

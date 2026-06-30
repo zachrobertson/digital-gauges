@@ -900,10 +900,9 @@ function FieldSelect({
   onChange: (field: TelemetryField) => void;
 }) {
   const fit = options.filter((o) => o.group === 'fit');
-  const camera = options.filter((o) => o.group === 'camera');
   const derived = options.filter((o) => o.group === 'derived');
   if (options.length === 0) {
-    return <p className="text-xs text-white/40">Load FIT or camera telemetry to pick a field.</p>;
+    return <p className="text-xs text-white/40">Load a FIT file to pick a field.</p>;
   }
   return (
     <div className="relative flex flex-col gap-1">
@@ -912,15 +911,6 @@ function FieldSelect({
         {fit.length > 0 && (
           <optgroup label="FIT">
             {fit.map((o) => (
-              <option key={`${o.field}-${o.trackId}`} value={o.field}>
-                {fieldLabel(o.field)} — {o.trackLabel}
-              </option>
-            ))}
-          </optgroup>
-        )}
-        {camera.length > 0 && (
-          <optgroup label="Camera">
-            {camera.map((o) => (
               <option key={`${o.field}-${o.trackId}`} value={o.field}>
                 {fieldLabel(o.field)} — {o.trackLabel}
               </option>

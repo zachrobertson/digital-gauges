@@ -7,7 +7,7 @@ app for overlaying telemetry gauges on ride videos and exporting burned-in MP4s.
 
 1. Search [existing issues](https://github.com/zachrobertson/digital-gauges/issues)
    to avoid duplicate work.
-2. For larger changes (new camera brands, export pipeline changes, sync model
+2. For larger changes (FIT parsing changes, export pipeline changes, sync model
    changes), open an issue first so we can agree on approach before you invest
    significant time.
 3. Bug reports should include OS version, app version, camera/bike computer
@@ -22,12 +22,8 @@ npm install
 npm run dev
 ```
 
-For Insta360, DJI, and Sony extraction you also need Python with
-`telemetry-parser` installed:
-
-```bash
-pip install telemetry-parser
-```
+Telemetry comes from FIT files only; no Python or camera-specific tools
+are required.
 
 ## Making changes
 
@@ -44,7 +40,7 @@ pip install telemetry-parser
 | Area | Path |
 |------|------|
 | Main process (Node) | `src/main/` |
-| Telemetry extractors | `src/main/extractors/` |
+| FIT parsing + ffprobe | `src/main/extractors/` |
 | FFmpeg export | `src/main/export/` |
 | React UI | `src/renderer/src/` |
 | Built-in gauges | `src/renderer/src/gauges/` |

@@ -4,21 +4,13 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import ffmpegPath from 'ffmpeg-static';
+import { FFMPEG_BIN } from '../ffmpeg-binaries';
 import { resolveExportMediaInfo, type ExportMediaInfo } from '../extractors/ffprobe';
 import { buildBaseConcatFromClips } from '../preview/concat';
 import type { Project, ExportSettings } from '../../shared/types';
 import { clipDurationMs, clipInMs, projectDurationMs, totalDurationMs } from '../../shared/timeline';
 import { distinctOverlayPaths, expandOverlayExportSegments } from '../../shared/overlayExport';
 import { checkExportMemoryBudget, exportMemoryBudgetError } from './budget';
-
-const FFMPEG_BIN: string = ((): string => {
-  if (typeof ffmpegPath === 'string') return ffmpegPath;
-  if (ffmpegPath && typeof (ffmpegPath as { path?: string }).path === 'string') {
-    return (ffmpegPath as { path: string }).path;
-  }
-  throw new Error('Could not resolve ffmpeg-static binary path.');
-})();
 
 type JobPhase = 'streaming' | 'segment-finalizing' | 'concat' | 'finalizing';
 type JobMode = 'single' | 'multi' | 'composite';

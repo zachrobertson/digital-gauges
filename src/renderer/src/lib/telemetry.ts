@@ -93,14 +93,6 @@ export function frameAtGlobalTime(
   return merged;
 }
 
-/** @deprecated Use frameAtGlobalTime — playhead is now global timeline ms. */
-export function frameAtVideoTime(
-  project: Project,
-  videoTimeMs: number,
-): TelemetryFrame {
-  return frameAtGlobalTime(project, videoTimeMs);
-}
-
 /** Sample merged telemetry for a specific clip at clip-local time. */
 export function frameAtClipLocalTime(
   project: Project,
