@@ -69,7 +69,6 @@ export interface Project {
   /** Schema version — bumped when the format changes incompatibly. */
   version: 5;
   id: string;
-  name: string;
   createdAt: string;
   updatedAt: string;
 

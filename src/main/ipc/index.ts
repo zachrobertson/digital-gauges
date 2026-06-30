@@ -136,8 +136,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   });
 
   ipcMain.handle('session:getRecoveryInfo', () => getRecoveryInfo());
-  ipcMain.handle('session:saveDraft', async (_e, project: Project) => {
-    await saveDraft(project);
+  ipcMain.handle('session:saveDraft', async (_e, project: Project, filePath: string | null) => {
+    await saveDraft(project, filePath);
   });
   ipcMain.handle('session:loadDraft', () => loadDraft());
   ipcMain.handle('session:clearDraft', () => clearDraft());

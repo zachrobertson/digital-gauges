@@ -10,7 +10,7 @@ import type {
   VideoOverlayClip,
 } from '../shared/types';
 import type { TelemetryTrack } from '../shared/types/telemetry';
-import type { RecoveryInfo } from '../shared/types/ipc';
+import type { DraftPayload, RecoveryInfo } from '../shared/types/ipc';
 import { assignClipTimelinePositions } from '../shared/timeline';
 import { DEFAULT_TRACK_SYNC } from '../shared/types/sync';
 import type {
@@ -207,7 +207,6 @@ function clamp01(v: unknown, fallback: number): number {
 function migrateV1ToV2(raw: Record<string, unknown>): Omit<Project, 'export'> & { export?: Project['export'] } {
   const p = raw as {
     id?: string;
-    name?: string;
     createdAt?: string;
     updatedAt?: string;
     video?: MediaSource | null;
@@ -250,7 +249,6 @@ function migrateV1ToV2(raw: Record<string, unknown>): Omit<Project, 'export'> & 
   return {
     version: 5,
     id: p.id ?? crypto.randomUUID(),
-    name: p.name ?? 'Untitled Ride',
     createdAt: p.createdAt ?? new Date().toISOString(),
     updatedAt: p.updatedAt ?? new Date().toISOString(),
     clips,
@@ -275,7 +273,6 @@ export function normalizeProject(raw: unknown): Project {
     base = {
       version: 5,
       id: p.id ?? crypto.randomUUID(),
-      name: p.name ?? 'Untitled Ride',
       createdAt: p.createdAt ?? new Date().toISOString(),
       updatedAt: p.updatedAt ?? new Date().toISOString(),
       clips: assignClipTimelinePositions(
@@ -352,15 +349,28 @@ export async function writeSettings(patch: Partial<AppSettings>): Promise<AppSet
   return next;
 }
 
-export async function saveDraft(project: Project): Promise<void> {
-  const normalized = normalizeProject(project);
-  await writeFile(draftPath(), JSON.stringify(normalized, null, 2), 'utf8');
+export async function saveDraft(
+  project: Project,
+  filePath: string | null = null,
+): Promise<void> {
+  const payload: DraftPayload = { filePath, project: normalizeProject(project) };
+  await writeFile(draftPath(), JSON.stringify(payload, null, 2), 'utf8');
 }
 
-export async function loadDraft(): Promise<Project | null> {
+export async function loadDraft(): Promise<DraftPayload | null> {
   if (!(await fileExists(draftPath()))) return null;
   const raw = await readFile(draftPath(), 'utf8');
-  return normalizeProject(JSON.parse(raw));
+  const parsed = JSON.parse(raw) as unknown;
+  // Current format wraps the project with its source path; older drafts stored
+  // a bare project (no association).
+  if (parsed && typeof parsed === 'object' && 'project' in parsed) {
+    const p = parsed as { filePath?: unknown; project: unknown };
+    return {
+      filePath: typeof p.filePath === 'string' ? p.filePath : null,
+      project: normalizeProject(p.project),
+    };
+  }
+  return { filePath: null, project: normalizeProject(parsed) };
 }
 
 export async function clearDraft(): Promise<void> {
@@ -374,13 +384,17 @@ export async function getRecoveryInfo(): Promise<RecoveryInfo> {
   const hasDraftFile = await fileExists(draftFile);
   let hasDraft = false;
   let draftUpdatedAt: string | null = null;
+  let draftFilePath: string | null = null;
+  let draftFileExists = false;
 
   if (hasDraftFile) {
     try {
       const draft = await loadDraft();
-      if (draft && projectHasSessionContent(draft)) {
+      if (draft && projectHasSessionContent(draft.project)) {
         hasDraft = true;
-        draftUpdatedAt = draft.updatedAt;
+        draftUpdatedAt = draft.project.updatedAt;
+        draftFilePath = draft.filePath;
+        draftFileExists = draft.filePath ? await fileExists(draft.filePath) : false;
       }
     } catch {
       hasDraft = false;
@@ -390,5 +404,12 @@ export async function getRecoveryInfo(): Promise<RecoveryInfo> {
   const lastProjectPath = settings.lastProjectPath;
   const lastProjectExists = lastProjectPath ? await fileExists(lastProjectPath) : false;
 
-  return { hasDraft, draftUpdatedAt, lastProjectPath, lastProjectExists };
+  return {
+    hasDraft,
+    draftUpdatedAt,
+    draftFilePath,
+    draftFileExists,
+    lastProjectPath,
+    lastProjectExists,
+  };
 }

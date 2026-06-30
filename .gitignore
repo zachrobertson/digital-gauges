@@ -11,3 +11,6 @@ data/
 release/
 .vscode/
 .cursor/
+
+# Local-only dev helpers (screenshot/automation scripts), not for distribution
+brand/local/

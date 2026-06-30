@@ -15,7 +15,7 @@ const api: DigitalGaugesApi = {
   loadProject: (path) => ipcRenderer.invoke('project:load', path),
 
   getRecoveryInfo: () => ipcRenderer.invoke('session:getRecoveryInfo'),
-  saveDraft: (project) => ipcRenderer.invoke('session:saveDraft', project),
+  saveDraft: (project, filePath) => ipcRenderer.invoke('session:saveDraft', project, filePath),
   loadDraft: () => ipcRenderer.invoke('session:loadDraft'),
   clearDraft: () => ipcRenderer.invoke('session:clearDraft'),
 

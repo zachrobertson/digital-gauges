@@ -19,7 +19,3 @@ export function projectNameFromPath(path: string): string {
 }
 
 export const DEFAULT_PROJECT_NAME = 'Untitled Ride';
-
-export function isDefaultProjectName(name: string): boolean {
-  return name.trim() === DEFAULT_PROJECT_NAME;
-}

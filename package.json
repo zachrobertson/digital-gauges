@@ -1,7 +1,7 @@
 {
   "name": "digital-gauges",
   "version": "0.1.0",
-  "description": "Cross-platform desktop app for adding live data gauges (speed, power, HR) from action camera + bike computer telemetry to ride videos",
+  "description": "Desktop app to overlay FIT telemetry (speed, power, HR, cadence, GPS, temperature, etc.) on action-camera video and export a single MP4 with burned-in overlays.",
   "main": "./out/main/index.js",
   "author": "Digital Gauges",
   "license": "MIT",
@@ -65,15 +65,18 @@
       "**/node_modules/ffprobe-static/**"
     ],
     "win": {
-      "target": ["nsis"]
+      "target": ["nsis"],
+      "icon": "build/icon.ico"
     },
     "mac": {
       "target": ["dmg"],
-      "category": "public.app-category.video"
+      "category": "public.app-category.video",
+      "icon": "build/icon.icns"
     },
     "linux": {
       "target": ["AppImage"],
-      "category": "Video"
+      "category": "Video",
+      "icon": "build/icons"
     },
     "nsis": {
       "oneClick": false,

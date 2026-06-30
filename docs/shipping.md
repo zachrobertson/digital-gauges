@@ -64,7 +64,7 @@ These ship inside the Electron package and require no user setup:
 - Electron runtime and the React UI
 - `ffmpeg-static` and `ffprobe-static` (video probe, preview concat,
   export burn-in)
-- Garmin / Wahoo FIT parsing (`fit-file-parser`)
+- FIT telemetry parsing (`fit-file-parser`)
 
 ### No external dependencies
 
@@ -81,6 +81,7 @@ Run through this before tagging a version or uploading installers.
 ```bash
 npm run typecheck
 npm run build
+npm test
 npm run build:win   # or build:mac / build:linux on the target OS
 ```
 
@@ -92,8 +93,8 @@ Test on a **clean machine or VM** (not your dev environment) so you
 catch missing dependencies:
 
 1. Install the packaged app from `./dist/`.
-2. Load a ride video from any camera.
-3. Import a FIT file from a bike computer.
+2. Load action-camera video from any camera.
+3. Import a FIT data file.
 4. Place and configure gauges in the editor.
 5. Preview the timeline.
 6. Export a burned-in MP4 and verify playback.
@@ -101,58 +102,39 @@ catch missing dependencies:
 ### Version and metadata
 
 1. Bump `version` in `package.json` (semver: `MAJOR.MINOR.PATCH`).
-2. Update release notes: supported bike computers and known
+2. Update release notes: supported FIT data sources and known
    limitations.
 3. Tag the release: `git tag v0.1.0` (match `package.json` version).
 
 ### Legal and attribution
 
-- The project is MIT-licensed (`LICENSE`). Ensure third-party notices
-  are included if required by bundled dependencies (FFmpeg, fonts,
-  Electron, etc.).
+- The project source is MIT-licensed (`LICENSE`). Distributed builds bundle
+  third-party components with separate licenses — keep
+  `THIRD_PARTY_NOTICES.md` accurate for the shipped version.
+- [ ] **Verify the bundled FFmpeg license before the first public binary
+  release.** The `ffmpeg-static` binary is published as
+  **GPL-3.0-or-later**, which imposes copyleft obligations on the
+  distributed app. Run the bundled binary and record its license line:
 
-## electron-builder configuration (not yet in repo)
+  ```bash
+  node -e "console.log(require('ffmpeg-static'))"   # path to the binary
+  "<printed path>" -version                          # check the config line
+  ```
 
-The project has `electron-builder` installed and npm scripts wired up,
-but there is **no `build` section in `package.json` yet**. electron-builder
-will use defaults, which is enough for local testing but insufficient
-for a polished release.
+  Look for `--enable-gpl` / the license in the banner. If GPL, either comply
+  (include GPL text, offer corresponding source, document how to obtain the
+  FFmpeg source) or migrate to an LGPL FFmpeg build / optional system
+  FFmpeg. See `THIRD_PARTY_NOTICES.md` for details.
 
-Add a `build` block to `package.json` before your first public release.
-Adjust `appId` and paths as needed:
+## electron-builder configuration
 
-```json
-"build": {
-  "appId": "com.digitalgauges.app",
-  "productName": "Digital Gauges",
-  "copyright": "Copyright © ${author}",
-  "directories": {
-    "output": "dist"
-  },
-  "files": [
-    "out/**/*",
-    "package.json"
-  ],
-  "win": {
-    "target": ["nsis"],
-    "icon": "build/icon.ico"
-  },
-  "mac": {
-    "target": ["dmg"],
-    "icon": "build/icon.icns",
-    "category": "public.app-category.video"
-  },
-  "linux": {
-    "target": ["AppImage"],
-    "icon": "build/icons",
-    "category": "Video"
-  },
-  "nsis": {
-    "oneClick": false,
-    "allowToChangeInstallationDirectory": true
-  }
-}
-```
+The `build` section in `package.json` is already configured with app ID,
+output directory, platform targets, and `asarUnpack` entries for
+`ffmpeg-static` and `ffprobe-static` (native binaries must not stay
+inside the asar archive).
+
+Before a polished public release, add application icons to the `build`
+section (currently omitted, so electron-builder uses defaults):
 
 You will also need application icons:
 
@@ -209,7 +191,7 @@ The repository already points to GitHub. The simplest delivery path:
    - macOS: `Digital Gauges-X.Y.Z.dmg`
    - Linux: `Digital Gauges-X.Y.Z.AppImage`
 6. Write release notes covering:
-   - Supported bike computers (FIT)
+   - Supported FIT data sources
    - Minimum OS versions
    - Known issues
 
@@ -218,8 +200,7 @@ The repository already points to GitHub. The simplest delivery path:
 ```markdown
 ## Digital Gauges v0.1.0
 
-Desktop app for overlaying live telemetry gauges on ride videos and
-exporting burned-in MP4s.
+Overlay FIT telemetry on action video and export a burned-in MP4.
 
 ### Downloads
 - **Windows** — `Digital-Gauges-Setup-0.1.0.exe`
@@ -228,10 +209,10 @@ exporting burned-in MP4s.
 
 ### Requirements
 - Windows 10+, macOS 12+, or a recent Linux distro with glibc
-- A ride video from any camera, plus a FIT file from a bike computer
+- Action-camera video from any camera, plus a FIT data file
 
 ### Supported telemetry
-- Garmin / Wahoo FIT files (speed, power, heart rate, cadence, GPS, …)
+- FIT files (speed, power, heart rate, cadence, GPS, temperature, …)
 ```
 
 ### Other delivery options (later)
@@ -243,23 +224,20 @@ exporting burned-in MP4s.
 | Package managers      | Possible for Linux (AUR, Flatpak) but extra effort |
 | App stores            | Poor fit (FFmpeg, local file access)               |
 
-## CI/CD (not yet configured)
+## CI/CD
 
-There is no `.github/workflows/` directory today. A typical release
-workflow builds all three platforms in parallel and uploads artifacts to
-a GitHub Release.
+`.github/workflows/ci.yml` runs on pushes and PRs to `main` and
+`develop`, and on version tags (`v*`). The pipeline:
 
-Suggested jobs:
+1. **validate** — `npm run typecheck`, `npm run build`, `npm test`
+2. **build** — matrix of `build:win`, `build:mac`, and `build:linux`
+   on matching runners (unsigned; `CSC_IDENTITY_AUTO_DISCOVERY: false`)
+3. **release** — on `v*` tags, uploads installer artifacts to a GitHub
+   Release via `softprops/action-gh-release`
 
-| Job            | Runner            | Command              |
-|----------------|-------------------|----------------------|
-| `build-windows`| `windows-latest`  | `npm run build:win`  |
-| `build-macos`  | `macos-latest`    | `npm run build:mac`  |
-| `build-linux`  | `ubuntu-latest`   | `npm run build:linux`|
-
-Store signing secrets (`CSC_LINK`, `CSC_KEY_PASSWORD`, Apple API key
-for notarization) in GitHub Actions secrets. Trigger on version tags
-(`v*`) or manual `workflow_dispatch`.
+For signed releases, store signing secrets (`CSC_LINK`, `CSC_KEY_PASSWORD`,
+Apple API key for notarization) in GitHub Actions secrets and adjust the
+workflow to enable signing.
 
 ## Post-release verification
 
@@ -280,6 +258,7 @@ npm run dev
 # Pre-release checks
 npm run typecheck
 npm run build
+npm test
 
 # Platform installers (run on matching OS)
 npm run build:win

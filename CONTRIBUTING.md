@@ -1,7 +1,8 @@
 # Contributing to Digital Gauges
 
-Thank you for your interest in contributing. This project is an Electron desktop
-app for overlaying telemetry gauges on ride videos and exporting burned-in MP4s.
+Thank you for your interest in contributing. Digital Gauges is a desktop app to
+overlay FIT telemetry (speed, power, HR, cadence, GPS, temperature, etc.) on
+action-camera video and export a single MP4 with burned-in overlays.
 
 ## Before you start
 
@@ -10,8 +11,8 @@ app for overlaying telemetry gauges on ride videos and exporting burned-in MP4s.
 2. For larger changes (FIT parsing changes, export pipeline changes, sync model
    changes), open an issue first so we can agree on approach before you invest
    significant time.
-3. Bug reports should include OS version, app version, camera/bike computer
-   model, and steps to reproduce when possible.
+3. Bug reports should include OS version, app version, camera model, FIT data
+   source, and steps to reproduce when possible.
 
 ## Development setup
 
@@ -51,6 +52,7 @@ are required.
 ```bash
 npm run typecheck
 npm run build
+npm test
 ```
 
 Manually smoke-test the flow you touched (load video, import FIT, place a
@@ -66,7 +68,7 @@ gauge, preview, export) when the change affects runtime behavior.
 ## What we welcome
 
 - Bug fixes and test clips / repro steps for extractor edge cases
-- New or improved telemetry extractors (with sample-file handling documented)
+- FIT parsing improvements and edge-case handling (with sample files documented)
 - Gauge editor and export improvements
 - Documentation and README fixes
 - Performance improvements with measurable impact
