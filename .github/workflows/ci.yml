@@ -19,8 +19,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-version:
+    name: Release version check
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.event.pull_request.base.ref }}
+
+      - name: Validate release version bump
+        env:
+          PR_HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: node scripts/check-release-version.mjs
+
   validate:
     name: Compile and test
+    needs: release-version
+    if: always() && (needs.release-version.result == 'success' || needs.release-version.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
