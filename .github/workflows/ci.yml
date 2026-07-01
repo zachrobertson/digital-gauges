@@ -39,7 +39,12 @@ jobs:
   validate:
     name: Compile and test
     needs: release-version
-    if: always() && (needs.release-version.result == 'success' || needs.release-version.result == 'skipped')
+    if: |
+      always() && (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.base.ref != 'main' ||
+        needs.release-version.result == 'success'
+      )
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

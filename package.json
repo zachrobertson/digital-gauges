@@ -1,6 +1,6 @@
 {
   "name": "digital-gauges",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Desktop app to overlay FIT telemetry (speed, power, HR, cadence, GPS, temperature, etc.) on action-camera video and export a single MP4 with burned-in overlays.",
   "main": "./out/main/index.js",
   "author": "Digital Gauges",
