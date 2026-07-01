@@ -39,12 +39,7 @@ jobs:
   validate:
     name: Compile and test
     needs: release-version
-    if: |
-      always() && (
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.base.ref != 'main' ||
-        needs.release-version.result == 'success'
-      )
+    if: always() && (needs.release-version.result == 'success' || needs.release-version.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -71,6 +66,7 @@ jobs:
   build:
     name: Build (${{ matrix.platform }})
     needs: validate
+    if: always() && needs.validate.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -121,7 +117,7 @@ jobs:
   release:
     name: Publish release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && needs.build.result == 'success' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
