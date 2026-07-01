@@ -101,10 +101,20 @@ catch missing dependencies:
 
 ### Version and metadata
 
-1. Bump `version` in `package.json` (semver: `MAJOR.MINOR.PATCH`).
-2. Update release notes: supported FIT data sources and known
+1. Open a **release PR** targeting `main`. Mark it as a release using
+   **one** of:
+   - branch name `release/*` (e.g. `release/1.0.0`)
+   - the `release` label on the PR
+   - `[release]` in the PR title
+2. Bump `version` in `package.json` (semver: `MAJOR.MINOR.PATCH`) to a
+   value **strictly greater** than `main`, then run `npm install` so
+   `package-lock.json` stays in sync.
+3. CI runs **Release version check** on the PR and fails if the version
+   was not bumped or the lockfile does not match.
+4. Update release notes: supported FIT data sources and known
    limitations.
-3. Tag the release: `git tag v0.1.0` (match `package.json` version).
+5. Merge the release PR to `main`, then tag: `git tag v1.0.0` (must
+   match `package.json` version).
 
 ### Legal and attribution
 
@@ -133,10 +143,8 @@ output directory, platform targets, and `asarUnpack` entries for
 `ffmpeg-static` and `ffprobe-static` (native binaries must not stay
 inside the asar archive).
 
-Before a polished public release, add application icons to the `build`
-section (currently omitted, so electron-builder uses defaults):
-
-You will also need application icons:
+Application icons live under `build/` (generated from `brand/icon.svg`
+via `node brand/generate-icons.mjs`):
 
 | Platform | File                          |
 |----------|-------------------------------|
@@ -144,7 +152,9 @@ You will also need application icons:
 | macOS    | `build/icon.icns`             |
 | Linux    | `build/icons/` (PNG set)      |
 
-None of these exist in the repository yet.
+Linux builds also set `desktopName` in `package.json` so
+`StartupWMClass` matches Electron's `WM_CLASS`, and ship
+`build/icon.png` via `extraResources` for the window/taskbar icon.
 
 ## Code signing and platform gatekeepers
 
@@ -182,18 +192,52 @@ macOS versions.
 
 The repository already points to GitHub. The simplest delivery path:
 
-1. Merge release-ready code to `main`.
-2. Tag: `git tag v0.1.0 && git push origin v0.1.0`.
-3. Build installers on each target OS (locally or via CI).
-4. Create a GitHub Release from the tag.
-5. Upload artifacts from `./dist/`:
+1. Open a release PR to `main` (branch `release/*`, label `release`, or
+   title containing `[release]`).
+2. Bump `version` in `package.json` and `package-lock.json`; wait for CI
+   **Release version check** to pass.
+3. Merge to `main`.
+4. Tag: `git tag v1.0.0 && git push origin v1.0.0` (tag must match
+   `package.json`).
+5. CI builds installers on each target OS and publishes a GitHub Release
+   from the tag.
+6. Verify artifacts on the release page:
    - Windows: `Digital Gauges Setup X.Y.Z.exe` (NSIS)
    - macOS: `Digital Gauges-X.Y.Z.dmg`
    - Linux: `Digital Gauges-X.Y.Z.AppImage`
-6. Write release notes covering:
+7. Write or review release notes covering:
    - Supported FIT data sources
    - Minimum OS versions
-   - Known issues
+   - Known issues (include the Linux AppImage notes below when shipping
+     Linux builds)
+
+### Linux AppImage (end-user setup)
+
+An AppImage is a portable single file — no installer. Include the
+following in release notes (or link to this section) so Linux users
+know how to run the app.
+
+1. Download `Digital-Gauges-X.Y.Z.AppImage`.
+2. Make it executable once: `chmod +x Digital-Gauges-*.AppImage`.
+3. Run from a terminal (`./Digital-Gauges-*.AppImage`) or integrate
+   into the application menu with
+   [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher)
+   (recommended on KDE).
+
+**Requirements:** 64-bit Linux with glibc (Debian 12+, Fedora, Ubuntu,
+etc.). On Debian, install `libfuse2t64` if the file will not mount.
+Alternatively: `./Digital-Gauges-*.AppImage --appimage-extract-and-run`.
+
+**Known issues:** Wayland sessions may fail to launch the app; logging
+in to an X11 session (e.g. Plasma on X11) or running with
+`--disable-gpu --disable-gpu-sandbox` may be required if the window
+never appears. The AppImage adds `--no-sandbox` automatically when user
+namespaces are unavailable; GPU flags are not added by default — users
+who need them can add those flags to the `.desktop` `Exec=` line or a
+wrapper script after AppImageLauncher integration.
+
+App preferences, projects, and gauge data are stored under the normal
+Electron user-data directory (`~/.config/`), not inside the AppImage.
 
 ### Release notes template
 
@@ -210,6 +254,18 @@ Overlay FIT telemetry on action video and export a burned-in MP4.
 ### Requirements
 - Windows 10+, macOS 12+, or a recent Linux distro with glibc
 - Action-camera video from any camera, plus a FIT data file
+
+### Linux (AppImage)
+
+1. Download `Digital-Gauges-X.Y.Z.AppImage`
+2. `chmod +x Digital-Gauges-*.AppImage`
+3. Run from terminal, or integrate with [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) for menu/dock support
+
+**Requirements:** 64-bit Linux with glibc (Debian 12+, Fedora, Ubuntu, etc.).
+Install `libfuse2t64` on Debian if the file won't start.
+
+**Known issues:** Wayland sessions may not launch the app; use Plasma (X11) or run with
+`--disable-gpu --disable-gpu-sandbox` if the window never appears.
 
 ### Supported telemetry
 - FIT files (speed, power, heart rate, cadence, GPS, temperature, …)
@@ -229,10 +285,15 @@ Overlay FIT telemetry on action video and export a burned-in MP4.
 `.github/workflows/ci.yml` runs on pushes and PRs to `main` and
 `develop`, and on version tags (`v*`). The pipeline:
 
-1. **validate** — `npm run typecheck`, `npm run build`, `npm test`
-2. **build** — matrix of `build:win`, `build:mac`, and `build:linux`
+1. **release-version** (PRs to `main` only) — when a PR is marked as a
+   release (branch `release/*`, label `release`, or title containing
+   `[release]`), verifies that `package.json` version is strictly greater
+   than `main` and that `package-lock.json` matches. Non-release PRs skip
+   this job.
+2. **validate** — `npm run typecheck`, `npm run build`, `npm test`
+3. **build** — matrix of `build:win`, `build:mac`, and `build:linux`
    on matching runners (unsigned; `CSC_IDENTITY_AUTO_DISCOVERY: false`)
-3. **release** — on `v*` tags, uploads installer artifacts to a GitHub
+4. **release** — on `v*` tags, uploads installer artifacts to a GitHub
    Release via `softprops/action-gh-release`
 
 For signed releases, store signing secrets (`CSC_LINK`, `CSC_KEY_PASSWORD`,
@@ -265,8 +326,11 @@ npm run build:win
 npm run build:mac
 npm run build:linux
 
-# Tag and publish (after builds succeed)
-git tag v0.1.0
-git push origin v0.1.0
-# Upload ./dist/ artifacts to the GitHub Release
+# Release PR to main (release/* branch, release label, or [release] title)
+# Bump package.json + npm install, merge when CI passes
+
+# Tag and publish (on main, after merge)
+git tag v1.0.0
+git push origin v1.0.0
+# CI uploads ./dist/ artifacts to the GitHub Release
 ```

@@ -1,6 +1,6 @@
 {
   "name": "digital-gauges",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "description": "Desktop app to overlay FIT telemetry (speed, power, HR, cadence, GPS, temperature, etc.) on action-camera video and export a single MP4 with burned-in overlays.",
   "main": "./out/main/index.js",
   "author": "Digital Gauges",
@@ -13,6 +13,7 @@
     "url": "https://github.com/zachrobertson/digital-gauges/issues"
   },
   "homepage": "https://github.com/zachrobertson/digital-gauges#readme",
+  "desktopName": "digital-gauges.desktop",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -64,6 +65,12 @@
       "**/node_modules/ffmpeg-static/**",
       "**/node_modules/ffprobe-static/**"
     ],
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
     "win": {
       "target": ["nsis"],
       "icon": "build/icon.ico"
@@ -76,6 +83,7 @@
     "linux": {
       "target": ["AppImage"],
       "category": "Video",
+      "executableName": "digital-gauges",
       "icon": "build/icons"
     },
     "nsis": {

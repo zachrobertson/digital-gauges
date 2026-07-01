@@ -39,6 +39,13 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null;
 
+/** Window/taskbar icon path — dev reads repo build/; packaged builds use extraResources. */
+function windowIconPath(): string {
+  return is.dev
+    ? join(__dirname, '../../build/icon.png')
+    : join(process.resourcesPath, 'icon.png');
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -47,10 +54,9 @@ function createWindow(): void {
     minHeight: 700,
     show: false,
     backgroundColor: '#0b0d10',
-    // Window/taskbar icon. On Windows/macOS the packaged build uses the
-    // executable/bundle icon (set by electron-builder); this primarily covers
-    // dev and Linux, where the runtime icon is read from disk.
-    icon: join(__dirname, '../../build/icon.png'),
+    // Window/taskbar icon. Windows/macOS also embed icon in the binary via
+    // electron-builder; Linux reads this PNG at runtime (_NET_WM_ICON).
+    icon: windowIconPath(),
     autoHideMenuBar: true,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
