@@ -1,6 +1,6 @@
 {
   "name": "digital-gauges",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Desktop app to overlay FIT telemetry (speed, power, HR, cadence, GPS, temperature, etc.) on action-camera video and export a single MP4 with burned-in overlays.",
   "main": "./out/main/index.js",
   "author": "Digital Gauges",
@@ -18,9 +18,9 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "build:win": "electron-vite build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux",
+    "build:win": "electron-vite build && electron-builder --win -p never",
+    "build:mac": "electron-vite build && electron-builder --mac -p never",
+    "build:linux": "electron-vite build && electron-builder --linux -p never",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
@@ -73,18 +73,21 @@
     ],
     "win": {
       "target": ["nsis"],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "artifactName": "Digital-Gauges-Setup-${version}.${ext}"
     },
     "mac": {
       "target": ["dmg"],
       "category": "public.app-category.video",
-      "icon": "build/icon.icns"
+      "icon": "build/icon.icns",
+      "artifactName": "Digital-Gauges-${version}-${arch}.${ext}"
     },
     "linux": {
       "target": ["AppImage"],
       "category": "Video",
       "executableName": "digital-gauges",
-      "icon": "build/icons"
+      "icon": "build/icons",
+      "artifactName": "Digital-Gauges-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,

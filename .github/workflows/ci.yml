@@ -3,9 +3,6 @@ name: CI
 permissions:
   contents: write
 
-env:
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 on:
   push:
     branches: [main, develop]
