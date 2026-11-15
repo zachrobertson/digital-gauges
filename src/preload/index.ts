@@ -10,6 +10,9 @@ const api: DigitalGaugesApi = {
 
   probeVideo: (path) => ipcRenderer.invoke('video:probe', path),
   parseFitFile: (path) => ipcRenderer.invoke('telemetry:parseFit', path),
+  probeCameraGps: (path) => ipcRenderer.invoke('gps:probe', path),
+  extractCameraGps: (path, videoDurationMs) => ipcRenderer.invoke('gps:extract', path, videoDurationMs),
+  cancelCameraGps: () => ipcRenderer.invoke('gps:cancel'),
 
   saveProject: (path, project) => ipcRenderer.invoke('project:save', path, project),
   loadProject: (path) => ipcRenderer.invoke('project:load', path),

@@ -10,6 +10,7 @@ import type {
   VideoOverlayClip,
 } from '../shared/types';
 import type { TelemetryTrack } from '../shared/types/telemetry';
+import type { GpsClockInfo } from '../shared/types/gps';
 import type { DraftPayload, RecoveryInfo } from '../shared/types/ipc';
 import { assignClipTimelinePositions } from '../shared/timeline';
 import { DEFAULT_TRACK_SYNC } from '../shared/types/sync';
@@ -89,7 +90,7 @@ function migrateTrackSync(raw: Record<string, unknown>): Record<string, TrackSyn
 
 function normalizeTrackSyncEntry(sync: Partial<TrackSyncSettings> | undefined): TrackSyncSettings {
   const anchor = sync?.anchor ?? DEFAULT_TRACK_SYNC.anchor;
-  const validAnchor = anchor === 'videoStart' || anchor === 'videoEnd' || anchor === 'utc' || anchor === 'manual'
+  const validAnchor = anchor === 'videoStart' || anchor === 'videoEnd' || anchor === 'utc' || anchor === 'gps' || anchor === 'manual'
     ? anchor
     : DEFAULT_TRACK_SYNC.anchor;
   return {
@@ -101,6 +102,17 @@ function normalizeTrackSyncEntry(sync: Partial<TrackSyncSettings> | undefined): 
   };
 }
 
+function normalizeGpsClock(raw: unknown): GpsClockInfo | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const g = raw as GpsClockInfo;
+  if (typeof g.videoStartUtcMs !== 'number' || !Number.isFinite(g.videoStartUtcMs)) return undefined;
+  return {
+    ...g,
+    experimental: g.experimental !== false,
+    warnings: Array.isArray(g.warnings) ? g.warnings.filter((w) => typeof w === 'string') : [],
+  };
+}
+
 function normalizeMediaSource(raw: unknown): MediaSource | null {
   if (!raw || typeof raw !== 'object') return null;
   const m = raw as MediaSource;
@@ -108,6 +120,7 @@ function normalizeMediaSource(raw: unknown): MediaSource | null {
   return {
     ...m,
     creationTime: typeof m.creationTime === 'string' ? m.creationTime : undefined,
+    gpsClock: normalizeGpsClock(m.gpsClock),
   };
 }
 

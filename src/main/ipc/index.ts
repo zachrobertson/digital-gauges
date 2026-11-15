@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, dialog } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { extractBrandLabel, ffprobe, parseFps, pickVideoStream, probeCreationTime, probeDurationMs } from '../extractors/ffprobe';
 import { parseFitFile } from '../extractors/fit';
+import { extractCameraGps, probeCameraGps } from '../gps';
 import {
   cancelExport,
   finishExportFrames,
@@ -34,6 +35,8 @@ import {
 } from '../template-persistence';
 import type {
   AppSettings,
+  CameraGpsProbe,
+  CameraGpsTrack,
   ExportProgress,
   ExportResult,
   GaugeTemplateFile,
@@ -45,6 +48,8 @@ import type {
 
 /** Aborts the currently in-flight preview build so a superseding build can take over. */
 let previewBuildAbort: AbortController | null = null;
+/** Aborts the in-flight camera GPS extraction. */
+let gpsExtractAbort: AbortController | null = null;
 
 export function registerIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('dialog:pickVideo', async () => {
@@ -120,6 +125,25 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('telemetry:parseFit', async (_e, path: string): Promise<TelemetryTrack> => {
     return parseFitFile(path);
+  });
+
+  ipcMain.handle('gps:probe', async (_e, path: string): Promise<CameraGpsProbe> => probeCameraGps(path));
+
+  ipcMain.handle('gps:extract', async (_e, path: string, videoDurationMs?: number): Promise<CameraGpsTrack> => {
+    // One extraction at a time — a new request supersedes the old one.
+    gpsExtractAbort?.abort();
+    const controller = new AbortController();
+    gpsExtractAbort = controller;
+    try {
+      return await extractCameraGps(path, { signal: controller.signal, videoDurationMs });
+    } finally {
+      if (gpsExtractAbort === controller) gpsExtractAbort = null;
+    }
+  });
+
+  ipcMain.handle('gps:cancel', async () => {
+    gpsExtractAbort?.abort();
+    gpsExtractAbort = null;
   });
 
   ipcMain.handle('project:save', async (_e, path: string, project: Project) => {
