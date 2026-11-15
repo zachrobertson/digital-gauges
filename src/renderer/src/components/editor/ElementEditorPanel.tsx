@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ArcElement, BarElement, GaugeElement, GaugeElementKind, MapElement, MarkerStyle, TextIcon, TextSlot } from '@shared/types/gaugeElement';
 import type { FillGradientConfig } from '@shared/types/fillGradient';
 import type { TelemetryField } from '@shared/types';
-import { defaultConfigForField } from '../../gauges/fieldRegistry';
+import { defaultConfigForField, isSmoothableField } from '../../gauges/fieldRegistry';
 import {
   derivedTextForRole,
   elementEditorMeta,
@@ -340,6 +340,12 @@ function ElementProperties({
           config={fieldConfig}
           value={scaleMax}
           onChange={(v) => onConfigChange(meta.patchScaleMax(fieldConfig, v))}
+        />
+      )}
+      {(element.kind === 'bar' || element.kind === 'arc' || element.kind === 'text') && isSmoothableField(element.field) && (
+        <SmoothingRow
+          value={element.smoothingSeconds ?? 0}
+          onChange={(v) => onPatch({ smoothingSeconds: v > 0 ? v : undefined } as Partial<GaugeElement>)}
         />
       )}
     </>
@@ -1014,6 +1020,22 @@ function ScaleMaxRow({ meta, config, value, onChange }: {
           className="flex-1 min-w-0 bg-white/5 rounded px-2 py-1 text-xs border border-white/10 font-mono" />
         <span className="text-xs text-white/40 shrink-0">{unitLabel}</span>
       </div>
+    </div>
+  );
+}
+
+const SMOOTHING_PRESETS = [0, 1, 3, 5, 10, 30];
+
+function SmoothingRow({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const presets = SMOOTHING_PRESETS.includes(value) ? SMOOTHING_PRESETS : [...SMOOTHING_PRESETS, value].sort((a, b) => a - b);
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="field-label">Smoothing</label>
+      <select className="select-input" value={value} onChange={(e) => onChange(Number(e.target.value))}>
+        {presets.map((s) => (
+          <option key={s} value={s}>{s === 0 ? 'Off — live value' : `${s}s rolling average`}</option>
+        ))}
+      </select>
     </div>
   );
 }

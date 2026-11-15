@@ -1,6 +1,12 @@
 import type { Project, TelemetryFrame, TelemetryTrack, TimelineClip, TrackSyncSettings } from '@shared/types';
 import { effectiveSharedFitOffsetMs } from '@shared/sync';
 import { clipAtGlobalTime, clipInMs, totalDurationMs } from '@shared/timeline';
+import {
+  createTelemetryHistory,
+  EMPTY_TELEMETRY_HISTORY,
+  type TelemetryHistory,
+  type TrackSamplePoint,
+} from '@shared/telemetryHistory';
 
 /** Track local sample time from clip-local video ms and sync settings. */
 function trackSampleTimeMs(localMs: number, sync: TrackSyncSettings | undefined): number {
@@ -20,7 +26,11 @@ export function fitSampleTimeAtGlobalMs(project: Project, globalMs: number): num
   return trackSampleTimeMs(loc.localMs + clipInMs(loc.clip), sync ? { ...sync, offsetMs: offset } : sync);
 }
 
-function mergeTracksAtLocalTime(
+/**
+ * For each track (local first, then shared — i.e. merge order), the
+ * track-local sample time that corresponds to clip-local video time `localMs`.
+ */
+function trackSamplePointsAtLocalTime(
   clips: TimelineClip[],
   clipIndex: number,
   localTracks: TelemetryTrack[],
@@ -30,20 +40,15 @@ function mergeTracksAtLocalTime(
   localMs: number,
   /** Trim in-point (source ms) — sync offsets are defined against source time. */
   sourceBaseMs: number,
-): TelemetryFrame {
-  const merged: TelemetryFrame = { offsetMs: localMs };
+): TrackSamplePoint[] {
   // Sync offsets were established against the untrimmed source clock, so sample
   // telemetry at the source time (inMs + timeline-local ms).
   const sourceMs = localMs + sourceBaseMs;
+  const points: TrackSamplePoint[] = [];
 
   for (const track of localTracks) {
     const sync = localTrackSync[track.id];
-    const f = sampleAt(track, trackSampleTimeMs(sourceMs, sync));
-    if (!f) continue;
-    for (const key of Object.keys(f)) {
-      if (key === 'offsetMs') continue;
-      merged[key] = f[key];
-    }
+    points.push({ track, sampleMs: trackSampleTimeMs(sourceMs, sync) });
   }
 
   for (const track of sharedTracks) {
@@ -51,14 +56,63 @@ function mergeTracksAtLocalTime(
     const offsetMs = track.source === 'fit'
       ? effectiveSharedFitOffsetMs(clips, clipIndex, track.id)
       : (sync?.offsetMs ?? 0);
-    const f = sampleAt(track, trackSampleTimeMs(sourceMs, sync ? { ...sync, offsetMs } : sync));
+    points.push({ track, sampleMs: trackSampleTimeMs(sourceMs, sync ? { ...sync, offsetMs } : sync) });
+  }
+
+  return points;
+}
+
+function mergeSamplePoints(points: TrackSamplePoint[], localMs: number): TelemetryFrame {
+  const merged: TelemetryFrame = { offsetMs: localMs };
+  for (const { track, sampleMs } of points) {
+    const f = sampleAt(track, sampleMs);
     if (!f) continue;
     for (const key of Object.keys(f)) {
       if (key === 'offsetMs') continue;
       merged[key] = f[key];
     }
   }
+  return merged;
+}
 
+function samplePointsAtGlobalTime(project: Project, globalMs: number): TrackSamplePoint[] | null {
+  const loc = clipAtGlobalTime(project.clips, globalMs);
+  if (!loc) return null;
+  return trackSamplePointsAtLocalTime(
+    project.clips,
+    loc.clipIndex,
+    loc.clip.localTracks,
+    loc.clip.localTrackSync,
+    project.sharedTracks,
+    loc.clip.sharedTrackSync,
+    loc.localMs,
+    clipInMs(loc.clip),
+  );
+}
+
+function samplePointsAtClipLocalTime(
+  project: Project,
+  clip: TimelineClip,
+  localMs: number,
+): TrackSamplePoint[] {
+  const clipIndex = project.clips.findIndex((c) => c.id === clip.id);
+  return trackSamplePointsAtLocalTime(
+    project.clips,
+    clipIndex >= 0 ? clipIndex : 0,
+    clip.localTracks,
+    clip.localTrackSync,
+    project.sharedTracks,
+    clip.sharedTrackSync,
+    localMs,
+    clipInMs(clip),
+  );
+}
+
+function withDerivedFields(project: Project, merged: TelemetryFrame): TelemetryFrame {
+  const finish = project.course?.finishDistanceM;
+  if (finish != null && typeof merged.distance === 'number') {
+    merged.distanceToFinish = Math.max(0, finish - merged.distance);
+  }
   return merged;
 }
 
@@ -70,27 +124,9 @@ export function frameAtGlobalTime(
   project: Project,
   globalMs: number,
 ): TelemetryFrame {
-  const loc = clipAtGlobalTime(project.clips, globalMs);
-  if (!loc) return { offsetMs: globalMs };
-
-  const merged = mergeTracksAtLocalTime(
-    project.clips,
-    loc.clipIndex,
-    loc.clip.localTracks,
-    loc.clip.localTrackSync,
-    project.sharedTracks,
-    loc.clip.sharedTrackSync,
-    loc.localMs,
-    clipInMs(loc.clip),
-  );
-  merged.offsetMs = globalMs;
-
-  const finish = project.course?.finishDistanceM;
-  if (finish != null && typeof merged.distance === 'number') {
-    merged.distanceToFinish = Math.max(0, finish - merged.distance);
-  }
-
-  return merged;
+  const points = samplePointsAtGlobalTime(project, globalMs);
+  if (!points) return { offsetMs: globalMs };
+  return withDerivedFields(project, mergeSamplePoints(points, globalMs));
 }
 
 /** Sample merged telemetry for a specific clip at clip-local time. */
@@ -99,25 +135,22 @@ export function frameAtClipLocalTime(
   clip: TimelineClip,
   localMs: number,
 ): TelemetryFrame {
-  const clipIndex = project.clips.findIndex((c) => c.id === clip.id);
-  const merged = mergeTracksAtLocalTime(
-    project.clips,
-    clipIndex >= 0 ? clipIndex : 0,
-    clip.localTracks,
-    clip.localTrackSync,
-    project.sharedTracks,
-    clip.sharedTrackSync,
-    localMs,
-    clipInMs(clip),
-  );
-  merged.offsetMs = localMs;
+  return withDerivedFields(project, mergeSamplePoints(samplePointsAtClipLocalTime(project, clip, localMs), localMs));
+}
 
-  const finish = project.course?.finishDistanceM;
-  if (finish != null && typeof merged.distance === 'number') {
-    merged.distanceToFinish = Math.max(0, finish - merged.distance);
-  }
+/** Rolling-window telemetry access at global timeline time (pairs with `frameAtGlobalTime`). */
+export function historyAtGlobalTime(project: Project, globalMs: number): TelemetryHistory {
+  const points = samplePointsAtGlobalTime(project, globalMs);
+  return points ? createTelemetryHistory(points) : EMPTY_TELEMETRY_HISTORY;
+}
 
-  return merged;
+/** Rolling-window telemetry access at clip-local time (pairs with `frameAtClipLocalTime`). */
+export function historyAtClipLocalTime(
+  project: Project,
+  clip: TimelineClip,
+  localMs: number,
+): TelemetryHistory {
+  return createTelemetryHistory(samplePointsAtClipLocalTime(project, clip, localMs));
 }
 
 /** Binary search for largest sample with offsetMs <= t. */

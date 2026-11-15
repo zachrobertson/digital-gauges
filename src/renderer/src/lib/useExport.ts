@@ -1,14 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useProject } from '../store/project';
 import { allPlugins } from '../store/plugins';
-import { buildCourseMarkers, buildRoutePolyline, frameAtClipLocalTime, frameAtGlobalTime, type RouteScope } from './telemetry';
+import {
+  buildCourseMarkers,
+  buildRoutePolyline,
+  frameAtClipLocalTime,
+  frameAtGlobalTime,
+  historyAtClipLocalTime,
+  historyAtGlobalTime,
+  type RouteScope,
+} from './telemetry';
 import { projectDurationMs } from '@shared/timeline';
 import type { GpsRouteScope } from '../gauges/gpsMiniMap';
 import { isMapGaugeConfig } from '../gauges/dataGauge';
 import { ensureFontsLoaded } from './fonts';
 import { withGaugeBoundsClip } from '../gauges/common';
 import { projectNameFromPath } from './projectSession';
-import type { GaugePlugin, Project } from '@shared/types';
+import type { GaugePlugin, Project, TelemetryFrame, TelemetryHistory } from '@shared/types';
+
+/** Telemetry for one export frame: the merged frame plus rolling-window access. */
+interface FrameSample {
+  frame: TelemetryFrame;
+  history: TelemetryHistory;
+}
 
 /**
  * Renderer-side export driver — supports single-clip and multi-clip (segment + concat) export.
@@ -149,7 +163,7 @@ async function renderAndPipeComposite(
     cancelRef,
     (i) => {
       const globalMs = Math.min(durationMs, Math.round((i / fps) * 1000));
-      return frameAtGlobalTime(project, globalMs);
+      return { frame: frameAtGlobalTime(project, globalMs), history: historyAtGlobalTime(project, globalMs) };
     },
   );
 }
@@ -166,7 +180,7 @@ async function renderAndPipeSingle(
   if (!clip) throw new Error('No clips');
   await renderClipFrames(jobId, project, clip, totalFrames, width, height, project.export.fps, cancelRef, (i, fps) => {
     const localMs = Math.round((i / fps) * 1000);
-    return frameAtClipLocalTime(project, clip, localMs);
+    return { frame: frameAtClipLocalTime(project, clip, localMs), history: historyAtClipLocalTime(project, clip, localMs) };
   });
 }
 
@@ -197,7 +211,7 @@ async function renderAndPipeMulti(
       cancelRef,
       (i, exportFps) => {
         const localMs = Math.round((i / exportFps) * 1000);
-        return frameAtClipLocalTime(project, clip, localMs);
+        return { frame: frameAtClipLocalTime(project, clip, localMs), history: historyAtClipLocalTime(project, clip, localMs) };
       },
     );
     await window.api.finishExportSegment(jobId);
@@ -213,7 +227,7 @@ async function renderClipFrames(
   height: number,
   fps: number,
   cancelRef: React.MutableRefObject<{ jobId: string | null; cancelled: boolean; reported: boolean }>,
-  sampleFrame: (frameIndex: number, fps: number) => ReturnType<typeof frameAtGlobalTime>,
+  sampleFrame: (frameIndex: number, fps: number) => FrameSample,
 ) {
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d');
@@ -231,7 +245,7 @@ async function renderClipFrames(
     if (cancelRef.current.cancelled) return;
 
     ctx.clearRect(0, 0, width, height);
-    const frame = sampleFrame(i, fps);
+    const { frame, history } = sampleFrame(i, fps);
 
     for (const g of sortedGauges) {
       const plugin = plugins.find((p) => p.id === g.pluginId);
@@ -254,7 +268,7 @@ async function renderClipFrames(
       }
       try {
         withGaugeBoundsClip(ctx as unknown as CanvasRenderingContext2D, rect, () => {
-          plugin.renderToCanvas(ctx as unknown as CanvasRenderingContext2D, frame, config, rect, 1);
+          plugin.renderToCanvas(ctx as unknown as CanvasRenderingContext2D, frame, config, rect, 1, history);
         });
       } catch {
         /* ignore individual gauge errors during export */

@@ -1,7 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { useProject } from '../../store/project';
 import { allPlugins, usePlugins } from '../../store/plugins';
-import { buildCourseMarkers, buildRoutePolyline, frameAtGlobalTime, type CourseMarkerPoints, type RouteScope } from '../../lib/telemetry';
+import {
+  buildCourseMarkers,
+  buildRoutePolyline,
+  frameAtGlobalTime,
+  historyAtGlobalTime,
+  type CourseMarkerPoints,
+  type RouteScope,
+} from '../../lib/telemetry';
 import type { GpsRouteScope } from '../../gauges/gpsMiniMap';
 import { isMapGaugeConfig } from '../../gauges/dataGauge';
 import { withGaugeBoundsClip } from '../../gauges/common';
@@ -85,6 +92,7 @@ export function CanvasOverlay({ width, height, showEditorAffordances, previewFro
       ctx.clearRect(0, 0, width, height);
       const { project, playhead } = useProject.getState();
       const frame = frameAtGlobalTime(project, playhead);
+      const history = historyAtGlobalTime(project, playhead);
 
       const plugins: GaugePlugin[] = allPlugins({
         builtins: usePlugins.getState().builtins,
@@ -117,7 +125,7 @@ export function CanvasOverlay({ width, height, showEditorAffordances, previewFro
         }
         try {
           withGaugeBoundsClip(ctx, rect, () => {
-            plugin.renderToCanvas(ctx, frame, config, rect, window.devicePixelRatio || 1);
+            plugin.renderToCanvas(ctx, frame, config, rect, window.devicePixelRatio || 1, history);
           });
         } catch (e) {
           drawGaugeError(ctx, rect, plugin.name, (e as Error).message);

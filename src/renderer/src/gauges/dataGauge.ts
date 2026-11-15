@@ -1,4 +1,4 @@
-import type { GaugePlugin, TelemetryField } from '@shared/types';
+import type { GaugePlugin, TelemetryField, TelemetryHistory } from '@shared/types';
 import { appearanceDefaults, appearanceSchemaProperties } from './appearanceSchema';
 import {
   barGaugeDefaults,
@@ -104,12 +104,12 @@ export const dataGauge: GaugePlugin<DataGaugeConfig> = {
       ...appearanceSchemaProperties,
     },
   },
-  renderToCanvas(ctx, frame, config, rect) {
+  renderToCanvas(ctx, frame, config, rect, _dpr, history) {
     const cfg = config as DataGaugeConfig;
     if (!isCompositeGaugeConfig(cfg as unknown as Record<string, unknown>)) {
       return;
     }
-    renderCompositeGauge(ctx, frame, cfg, rect);
+    renderCompositeGauge(ctx, frame, cfg, rect, history);
   },
 };
 
@@ -118,13 +118,14 @@ function renderCompositeGauge(
   frame: Parameters<GaugePlugin['renderToCanvas']>[1],
   config: DataGaugeConfig,
   rect: { x: number; y: number; w: number; h: number },
+  history: TelemetryHistory | undefined,
 ): void {
   withGaugeBoundsClip(ctx, rect, () => {
     const panelStyle = panelStyleFromConfig(config);
     const layout = mergeGaugeLayout(config.layout);
     withLayoutVideoTransform(ctx, layout, rect, () => {
       fillPanel(ctx, layout.gaugeRect, panelStyle);
-      renderGaugeElements(ctx, layout, frame, config, panelStyle);
+      renderGaugeElements(ctx, layout, frame, config, panelStyle, history);
     });
   });
 }

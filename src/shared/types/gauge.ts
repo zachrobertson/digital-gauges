@@ -1,4 +1,7 @@
 import type { TelemetryFrame, TelemetryField } from './telemetry';
+import type { TelemetryHistory } from '../telemetryHistory';
+
+export type { TelemetryHistory };
 
 /** JSON Schema subset (Draft-7) the gauge editor knows how to render. */
 export interface JSONSchemaProperty {
@@ -65,6 +68,11 @@ export interface GaugePlugin<
   /**
    * Canvas-based render — single source of truth.
    * The React preview is just a wrapper that drives the same render fn.
+   *
+   * `history` gives stateless rolling-window access to telemetry around the
+   * current frame (e.g. `history.average('power', 3000)`). Use it instead of
+   * buffering frames inside the gauge: render calls are not sequential
+   * (preview redraws while paused, scrubbing seeks, export restarts per clip).
    */
   renderToCanvas: (
     canvasCtx: CanvasRenderingContext2D,
@@ -72,6 +80,7 @@ export interface GaugePlugin<
     config: Config,
     rect: { x: number; y: number; w: number; h: number },
     dpr: number,
+    history: TelemetryHistory,
   ) => void;
 }
 
