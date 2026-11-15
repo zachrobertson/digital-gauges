@@ -2,6 +2,7 @@ import type { GaugeTemplateFile, GaugeTemplateSummary } from './gaugeTemplate';
 import type { Project } from './project';
 import type { TelemetryTrack } from './telemetry';
 import type { AppSettings } from './settings';
+import type { CameraGpsProbe, CameraGpsTrack } from './gps';
 
 export type { GaugeTemplateFile, GaugeTemplateSummary };
 
@@ -33,6 +34,12 @@ export interface DigitalGaugesApi {
 
   probeVideo(path: string): Promise<VideoProbe>;
   parseFitFile(path: string): Promise<TelemetryTrack>;
+
+  /** Fast check for usable camera GPS — reads only the file index / footer. */
+  probeCameraGps(path: string): Promise<CameraGpsProbe>;
+  /** Read camera GPS for sync. Only one extraction runs at a time. */
+  extractCameraGps(path: string, videoDurationMs?: number): Promise<CameraGpsTrack>;
+  cancelCameraGps(): Promise<void>;
 
   saveProject(path: string, project: Project): Promise<void>;
   loadProject(path: string): Promise<Project>;

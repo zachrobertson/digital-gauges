@@ -1,4 +1,5 @@
 import type { MediaSource, SyncAnchor, TimelineClip, TrackSyncSettings, VideoOverlayClip } from './types';
+import { isFixedOffsetAnchor } from './types/sync';
 import type { TelemetryTrack } from './types';
 import {
   clipAtGlobalTime,
@@ -45,6 +46,12 @@ export function computeOffsetFromAnchor(
       const trackMs = new Date(track.startTime).getTime();
       if (videoMs == null || !Number.isFinite(trackMs)) return 0;
       return trackMs - videoMs;
+    }
+    case 'gps': {
+      const gpsMs = video?.gpsClock?.videoStartUtcMs;
+      const trackMs = new Date(track.startTime).getTime();
+      if (gpsMs == null || !Number.isFinite(gpsMs) || !Number.isFinite(trackMs)) return 0;
+      return trackMs - gpsMs;
     }
     case 'manual':
       return 0;
@@ -142,7 +149,7 @@ export function repairSharedFitSync(
 
     for (const t of fitTracks) {
       const sync = sharedTrackSync[t.id];
-      if (!sync || sync.anchor === 'manual') continue;
+      if (!sync || isFixedOffsetAnchor(sync.anchor)) continue;
       if (!prev.sharedTrackSync[t.id]) continue;
       const chained = chainedFitOffsetMs(prev, t.id);
       if (sync.offsetMs === chained) continue;
@@ -172,7 +179,7 @@ export function rechainedSharedFitSyncFrom(
     const clip = next[i]!;
     const prev = next[i - 1]!;
     const sync = clip.sharedTrackSync[fitTrackId];
-    if (!sync || sync.anchor === 'manual') continue;
+    if (!sync || isFixedOffsetAnchor(sync.anchor)) continue;
     const chained = chainedFitOffsetMs(prev, fitTrackId);
     if (sync.offsetMs === chained) continue;
     next[i] = {
@@ -233,7 +240,7 @@ export function applySharedFitAnchorToAllClips(
   let next = clips.map((clip, clipIndex) => {
     const prev = clip.sharedTrackSync[fitTrackId];
     let offsetMs: number;
-    if (anchor === 'manual') {
+    if (isFixedOffsetAnchor(anchor)) {
       offsetMs = clipIndex === 0
         ? (manualSeedOffsetMs ?? prev?.offsetMs ?? 0)
         : (prev?.offsetMs ?? 0);
@@ -271,7 +278,7 @@ export function effectiveSharedFitOffsetMs(
   if (!clip) return 0;
   const sync = clip.sharedTrackSync[fitTrackId];
   if (!sync) return 0;
-  if (sync.anchor === 'manual' || clipIndex === 0) return sync.offsetMs;
+  if (isFixedOffsetAnchor(sync.anchor) || clipIndex === 0) return sync.offsetMs;
   const prev = clips[clipIndex - 1];
   if (!prev?.sharedTrackSync[fitTrackId]) return sync.offsetMs;
   return chainedFitOffsetMs(prev, fitTrackId);
@@ -290,7 +297,7 @@ export function refreshAnchoredTrackSync(
   for (const t of tracks) {
     if (t.source !== 'fit') continue;
     const sync = next[t.id];
-    if (!sync || sync.anchor === 'manual') continue;
+    if (!sync || isFixedOffsetAnchor(sync.anchor)) continue;
     next[t.id] = {
       ...sync,
       offsetMs: computeOffsetFromAnchor(sync.anchor, video, t),
@@ -362,7 +369,7 @@ export function refreshClipSharedTrackSync(
   for (const t of sharedTracks) {
     if (t.source !== 'fit') continue;
     const sync = next[t.id];
-    if (!sync || sync.anchor === 'manual') continue;
+    if (!sync || isFixedOffsetAnchor(sync.anchor)) continue;
     if (
       clipIndex != null
       && clipIndex > 0
@@ -384,6 +391,7 @@ export const SYNC_ANCHOR_LABELS: Record<SyncAnchor, string> = {
   utc: 'UTC (container clock)',
   videoStart: 'Video start',
   videoEnd: 'Video end',
+  gps: 'GPS (camera clock) — experimental',
   manual: 'Manual',
 };
 

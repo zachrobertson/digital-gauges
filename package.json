@@ -24,7 +24,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
-    "test": "tsx scripts/trim-sync-selftest.ts && tsx scripts/preview-concat-selftest.ts && tsx --tsconfig tsconfig.web.json scripts/telemetry-history-selftest.ts"
+    "test": "tsx scripts/trim-sync-selftest.ts && tsx scripts/preview-concat-selftest.ts && tsx --tsconfig tsconfig.web.json scripts/telemetry-history-selftest.ts && tsx scripts/gps-selftest.ts"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",

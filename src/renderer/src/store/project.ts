@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   GaugeInstance,
+  GpsClockInfo,
   MediaSource,
   PreviewProgress,
   Project,
@@ -202,7 +203,10 @@ interface ProjectState {
   addClipLocalTrack(clipId: string, t: TelemetryTrack): void;
   removeClipLocalTrack(clipId: string, trackId: string): void;
 
-  setClipOffset(clipId: string, trackId: string, ms: number, scope: 'local' | 'shared'): void;
+  /** Set a fixed FIT offset. `anchor` records where it came from (default: manual). */
+  setClipOffset(clipId: string, trackId: string, ms: number, scope: 'local' | 'shared', anchor?: 'manual' | 'gps'): void;
+  /** Store (or clear) the camera-GPS video start time on a clip's media. */
+  setClipGpsClock(clipId: string, gpsClock: GpsClockInfo | undefined): void;
   setClipTrackAnchor(clipId: string, trackId: string, anchor: SyncAnchor, scope: 'local' | 'shared'): void;
 
   addGauge(g: GaugeInstance): void;
@@ -740,7 +744,7 @@ export const useProject = create<ProjectState>((set) => ({
     };
   }),
 
-  setClipOffset: (clipId, trackId, ms, scope) => set((s) => {
+  setClipOffset: (clipId, trackId, ms, scope, anchor = 'manual') => set((s) => {
     const syncKey = scope === 'local' ? 'localTrackSync' : 'sharedTrackSync';
 
     if (scope === 'shared') {
@@ -759,7 +763,7 @@ export const useProject = create<ProjectState>((set) => ({
           s.project.clips,
           trackId,
           fit,
-          'manual',
+          anchor,
           baseOffsetMs,
         );
         return {
@@ -777,11 +781,21 @@ export const useProject = create<ProjectState>((set) => ({
           [trackId]: {
             offsetMs: ms,
             playSpeedPercent: prev?.playSpeedPercent ?? 100,
-            anchor: 'manual',
+            anchor,
           },
         },
       };
     });
+    return {
+      project: { ...s.project, clips, updatedAt: new Date().toISOString() },
+    };
+  }),
+
+  setClipGpsClock: (clipId, gpsClock) => set((s) => {
+    const clips = updateClip(s.project.clips, clipId, (clip) => ({
+      ...clip,
+      media: { ...clip.media, gpsClock },
+    }));
     return {
       project: { ...s.project, clips, updatedAt: new Date().toISOString() },
     };

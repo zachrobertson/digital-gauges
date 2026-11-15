@@ -1,8 +1,10 @@
 import type { Project, TimelineClip } from '@shared/types';
 import { videoUtcMs } from '@shared/sync';
+import { isFixedOffsetAnchor } from '@shared/types';
 
 export type ClipSyncStatus =
   | 'auto-utc'
+  | 'auto-gps'
   | 'manual'
   | 'missing-fit'
   | 'needs-manual';
@@ -16,6 +18,11 @@ export interface ClipSyncStatusDisplay {
 const STATUS_DISPLAY: Record<ClipSyncStatus, ClipSyncStatusDisplay> = {
   'auto-utc': {
     label: 'Auto (UTC)',
+    background: 'rgba(61,220,151,0.14)',
+    color: '#3ddc97',
+  },
+  'auto-gps': {
+    label: 'Auto (GPS)',
     background: 'rgba(61,220,151,0.14)',
     color: '#3ddc97',
   },
@@ -62,11 +69,12 @@ export function clipSyncStatus(
 
   // Shared FIT is one continuous sync — clip 2+ inherit clip 1's mode unless
   // this clip explicitly overrides with manual (e.g. after a split).
-  if (scope === 'shared' && clipIndex > 0 && sync?.anchor !== 'manual') {
+  if (scope === 'shared' && clipIndex > 0 && !isFixedOffsetAnchor(sync?.anchor)) {
     sync = project.clips[0]?.sharedTrackSync[fitTrack.id] ?? sync;
   }
 
   if (sync?.anchor === 'manual') return 'manual';
+  if (sync?.anchor === 'gps') return 'auto-gps';
 
   if (videoUtcMs(clip.media) == null) return 'needs-manual';
 

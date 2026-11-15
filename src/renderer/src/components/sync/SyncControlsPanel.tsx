@@ -14,6 +14,7 @@ import {
 } from '@shared/sync';
 import { clipSyncStatus, clipSyncStatusDisplay } from '../../lib/syncStatus';
 import { ClipList } from '../timeline/ClipList';
+import { GpsAlignSection } from './GpsAlignSection';
 
 const DATA_HUE: Record<string, string> = {
   fit: '#f5a524',
@@ -144,9 +145,12 @@ export function SyncControlsPanel() {
             className="select-input text-xs py-1 w-full"
             title="How this track is aligned to the clip"
           >
-            {(Object.keys(SYNC_ANCHOR_LABELS) as SyncAnchor[]).map((key) => (
-              <option key={key} value={key}>{SYNC_ANCHOR_LABELS[key]}</option>
-            ))}
+            {(Object.keys(SYNC_ANCHOR_LABELS) as SyncAnchor[])
+              // GPS is set by "Auto-align via GPS", not picked from the list.
+              .filter((key) => key !== 'gps' || currentAnchor === 'gps')
+              .map((key) => (
+                <option key={key} value={key}>{SYNC_ANCHOR_LABELS[key]}</option>
+              ))}
           </select>
 
           {currentAnchor === 'manual' && (
@@ -198,6 +202,16 @@ export function SyncControlsPanel() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Camera GPS auto-align */}
+      {fitTrack && (
+        <GpsAlignSection
+          clip={selectedClip}
+          fitTrack={fitTrack}
+          fitScope={fitScope}
+          active={currentAnchor === 'gps'}
+        />
       )}
 
       {/* Course markers */}

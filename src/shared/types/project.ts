@@ -2,6 +2,7 @@ import type { ExportResolution } from '../export';
 import type { GaugeInstance } from './gauge';
 import type { TelemetryTrack } from './telemetry';
 import type { TrackSyncSettings } from './sync';
+import type { GpsClockInfo } from './gps';
 
 export interface MediaSource {
   /** Stable id used inside a Project. */
@@ -16,6 +17,8 @@ export interface MediaSource {
   fps: number;
   /** ISO 8601 UTC from ffprobe format.tags.creation_time, when present. */
   creationTime?: string;
+  /** Video start time from the camera's own GPS, set by "Auto-align via GPS". */
+  gpsClock?: GpsClockInfo;
 }
 
 export interface TimelineClip {
