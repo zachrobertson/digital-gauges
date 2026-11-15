@@ -1,5 +1,5 @@
 import type { GaugeElement } from '@shared/types/gaugeElement';
-import type { TelemetryFrame } from '@shared/types';
+import type { TelemetryField, TelemetryFrame, TelemetryHistory } from '@shared/types';
 import type { PanelStyle } from './common';
 import { clamp, roundRect } from './common';
 import { DEFAULT_FONT_FAMILY } from '../lib/fonts';
@@ -24,7 +24,7 @@ import {
 } from './gaugeGradient';
 import { fillColorForRatio } from './gaugeGradient';
 import { mergeElementFieldConfig } from './gaugeEditorAdapter';
-import { fieldMeta } from './fieldRegistry';
+import { fieldMeta, isSmoothableField } from './fieldRegistry';
 import { drawGpsMapOnCanvas, resolveCourseMarkerOverlay } from './gpsMapDraw';
 import type { DataGaugeConfig } from './dataGauge';
 import { drawTextIcon } from './textIcons';
@@ -33,6 +33,8 @@ export interface ElementRenderOptions {
   ctx: CanvasRenderingContext2D;
   element: GaugeElement;
   frame: TelemetryFrame | null;
+  /** Rolling-window telemetry access; absent in editor previews with synthetic frames. */
+  history?: TelemetryHistory;
   gaugeConfig: DataGaugeConfig;
   panelStyle: PanelStyle;
   layout: GaugeLayoutConfig;
@@ -40,6 +42,21 @@ export interface ElementRenderOptions {
   showScaleLabels?: boolean;
   showArcTicks?: boolean;
   arcTickCount?: number;
+}
+
+/**
+ * Value an element displays: the rolling average when the element has a
+ * smoothing window (and history is available), otherwise the current sample.
+ */
+export function elementFieldValue(
+  element: { field: TelemetryField; smoothingSeconds?: number },
+  frame: TelemetryFrame | null,
+  history: TelemetryHistory | undefined,
+): number {
+  const instant = (frame?.[element.field] as number | undefined) ?? 0;
+  const secs = element.smoothingSeconds ?? 0;
+  if (!history || !(secs > 0) || !isSmoothableField(element.field)) return instant;
+  return history.average(element.field, secs * 1000) ?? instant;
 }
 
 function elementFieldConfig(
@@ -126,7 +143,7 @@ function roleTextForElement(
 }
 
 export function renderGaugeElement(options: ElementRenderOptions): void {
-  const { ctx, element, frame, gaugeConfig, panelStyle } = options;
+  const { ctx, element, frame, history, gaugeConfig, panelStyle } = options;
   if (!element.visible) return;
 
   const fontFamily = panelStyle.fontFamily ?? DEFAULT_FONT_FAMILY;
@@ -143,7 +160,7 @@ export function renderGaugeElement(options: ElementRenderOptions): void {
       const cfg = elementFieldConfig(gaugeConfig, element);
       const meta = fieldMeta(element.field);
       if (!meta) return;
-      const raw = (frame?.[element.field] as number | undefined) ?? 0;
+      const raw = elementFieldValue(element, frame, history);
       const ratio = meta.getRatio(raw, cfg);
       const accent = fieldAccent(element, gaugeConfig, cfg);
       const color = fieldFillColor(element, raw, ratio, cfg, accent, gradient.enabled ? gradient : undefined);
@@ -171,7 +188,7 @@ export function renderGaugeElement(options: ElementRenderOptions): void {
       const cfg = elementFieldConfig(gaugeConfig, element);
       const meta = fieldMeta(element.field);
       if (!meta) return;
-      const raw = (frame?.[element.field] as number | undefined) ?? 0;
+      const raw = elementFieldValue(element, frame, history);
       const ratio = meta.getRatio(raw, cfg);
       const scaleMax = meta.getScaleMax(cfg);
       const accent = fieldAccent(element, gaugeConfig, cfg);
@@ -238,7 +255,7 @@ export function renderGaugeElement(options: ElementRenderOptions): void {
       const cfg = elementFieldConfig(gaugeConfig, element);
       const meta = fieldMeta(element.field);
       if (!meta) return;
-      const raw = (frame?.[element.field] as number | undefined) ?? 0;
+      const raw = elementFieldValue(element, frame, history);
       const accent = fieldAccent(element, gaugeConfig, cfg);
       drawTextSlotsInLayoutSpace(ctx, element, {
         accentColor: accent,
@@ -344,12 +361,14 @@ export function renderGaugeElements(
   frame: TelemetryFrame | null,
   gaugeConfig: DataGaugeConfig,
   panelStyle: PanelStyle,
+  history?: TelemetryHistory,
 ): void {
   for (const element of layout.elements) {
     renderGaugeElement({
       ctx,
       element,
       frame,
+      history,
       gaugeConfig,
       panelStyle,
       layout,

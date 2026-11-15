@@ -299,4 +299,17 @@ export const SCALAR_GAUGE_FIELDS: TelemetryField[] = [
   'accelX', 'accelY', 'accelZ', 'gyroX', 'gyroY', 'gyroZ', 'lat', 'lon',
 ];
 
+/**
+ * Fields where a rolling average is meaningful. Position and cumulative fields
+ * (lat/lon, distance) are excluded — averaging them only adds lag.
+ */
+const SMOOTHABLE_FIELDS = new Set<TelemetryField>([
+  'speed', 'power', 'hr', 'cadence', 'alt', 'temp', 'grade', 'leanAngle',
+  'accelX', 'accelY', 'accelZ', 'gyroX', 'gyroY', 'gyroZ',
+]);
+
+export function isSmoothableField(field: TelemetryField): boolean {
+  return SMOOTHABLE_FIELDS.has(field);
+}
+
 export const DATA_GAUGE_PLUGIN_ID = 'builtin:dataGauge';

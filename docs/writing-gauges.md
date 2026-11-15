@@ -55,7 +55,7 @@ export default plugin;
 | `defaultRect`     | yes      | Default position/size in relative units (0–1). |
 | `defaultConfig`   | yes      | Default config object. |
 | `schema`          | yes      | JSON Schema (Draft-7 subset) describing the editable config. The app renders a generic form from it. |
-| `renderToCanvas`  | yes      | Pure canvas render — called every frame at preview *and* at export. Receives a fifth `dpr` argument (device pixel ratio); you can ignore it for simple gauges. |
+| `renderToCanvas`  | yes      | Pure canvas render — called every frame at preview *and* at export. Also receives `dpr` (device pixel ratio) and `history` (rolling-window telemetry, see below); you can ignore both for simple gauges. |
 
 ## Available telemetry fields
 
@@ -77,6 +77,33 @@ passed to your `renderToCanvas`. Available keys:
 - `gyroX`, `gyroY`, `gyroZ` (rad/s)
 
 Any field may be `undefined` if the active telemetry doesn't include it.
+
+## Rolling averages (`history`)
+
+`frame` only holds the current sample. For smoothed values, use the sixth
+`renderToCanvas` argument instead of buffering frames yourself:
+
+```tsx
+renderToCanvas(ctx, frame, config, rect, dpr, history) {
+  // Mean of the power samples in the last 3 s of ride time ("3s power").
+  const watts = history.average('power', 3000) ?? frame?.power ?? 0;
+  // ...
+}
+```
+
+`history.average(field, windowMs)` averages the samples whose timestamps
+fall within the trailing `windowMs` of ride time, ending at the current
+frame. It returns `undefined` when no loaded track has the field. Like the
+live value, it only changes when a new sample arrives, and it holds the
+last value across recording gaps.
+
+Don't keep frame buffers in module or closure state. Render calls are not
+sequential: the preview redraws while paused and seeks when you scrub, and
+export starts each clip from its first frame. `history` reads straight
+from the loaded track, so it gives the same result in all of those cases.
+
+Data Gauge elements expose the same feature in the editor through the
+**Smoothing** dropdown on bar, arc, and text elements.
 
 ## JSON Schema supported features
 

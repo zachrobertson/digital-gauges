@@ -61,6 +61,8 @@ export interface GaugeElementBase {
 export interface ArcElement extends GaugeElementBase {
   kind: 'arc';
   field: TelemetryField;
+  /** Rolling-average window in seconds of ride time (0/absent = instantaneous value). */
+  smoothingSeconds?: number;
   center: XY;
   radius: number;
   startDeg: number;
@@ -85,6 +87,8 @@ export interface ArcElement extends GaugeElementBase {
 export interface BarElement extends GaugeElementBase {
   kind: 'bar';
   field: TelemetryField;
+  /** Rolling-average window in seconds of ride time (0/absent = instantaneous value). */
+  smoothingSeconds?: number;
   rect: LayoutRect;
   rounded: boolean;
   color: TextColorChoice;
@@ -102,6 +106,8 @@ export interface BarElement extends GaugeElementBase {
 export interface TextReadoutElement extends GaugeElementBase {
   kind: 'text';
   field: TelemetryField;
+  /** Rolling-average window in seconds of ride time (0/absent = instantaneous value). */
+  smoothingSeconds?: number;
   value: TextSlot;
   /** Position/style for the field-derived unit (text comes from telemetry formatting). */
   unit: TextSlot;
