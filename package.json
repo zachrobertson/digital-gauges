@@ -72,24 +72,18 @@
       }
     ],
     "win": {
-      "target": [
-        "nsis"
-      ],
+      "target": ["nsis"],
       "icon": "build/icon.ico",
       "artifactName": "Digital-Gauges-Setup-${version}.${ext}"
     },
     "mac": {
-      "target": [
-        "dmg"
-      ],
+      "target": ["dmg"],
       "category": "public.app-category.video",
       "icon": "build/icon.icns",
       "artifactName": "Digital-Gauges-${version}-${arch}.${ext}"
     },
     "linux": {
-      "target": [
-        "AppImage"
-      ],
+      "target": ["AppImage"],
       "category": "Video",
       "executableName": "digital-gauges",
       "icon": "build/icons",
